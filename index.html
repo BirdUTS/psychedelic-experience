@@ -254,7 +254,23 @@ class RippleSystem{
   update(dt){for(let i=this.r.length-1;i>=0;i--){const r=this.r[i];r.r+=dt*120;r.a=.6*(1-r.r/r.maxR);if(r.a<=.01)this.r.splice(i,1);}}
   draw(ctx){
     ctx.save();ctx.globalCompositeOperation='screen';
-    for(const r of this.r){ctx.strokeStyle=`hsla(${r.hue|0},90%,65%,${r.a.toFixed(2)})`;ctx.lineWidth=Math.max(1,3*(1-r.r/r.maxR));ctx.beginPath();ctx.arc(r.x,r.y,r.r,0,TAU);ctx.stroke();}
+    for(const r of this.r){
+      const progress=r.r/r.maxR;
+      // Outer glow ring
+      ctx.strokeStyle=`hsla(${(r.hue+20)|0},85%,55%,${(r.a*.3).toFixed(3)})`;
+      ctx.lineWidth=Math.max(2,6*(1-progress));
+      ctx.beginPath();ctx.arc(r.x,r.y,r.r,0,TAU);ctx.stroke();
+      // Core ring
+      ctx.strokeStyle=`hsla(${r.hue|0},95%,65%,${r.a.toFixed(3)})`;
+      ctx.lineWidth=Math.max(.5,2.5*(1-progress));
+      ctx.beginPath();ctx.arc(r.x,r.y,r.r,0,TAU);ctx.stroke();
+      // Inner ring (smaller, brighter)
+      if(progress<.5){
+        ctx.strokeStyle=`hsla(${(r.hue-15)|0},100%,75%,${(r.a*.6*(1-progress*2)).toFixed(3)})`;
+        ctx.lineWidth=1;
+        ctx.beginPath();ctx.arc(r.x,r.y,r.r*.7,0,TAU);ctx.stroke();
+      }
+    }
     ctx.restore();
   }
 }
@@ -270,10 +286,18 @@ class TrailSystem{
     if(!this.active)return;
     const live=[];for(let i=0;i<this.len;i++){const p=this.pts[(this.head+i)%this.len];if(p.age<2)live.push(p);}
     if(live.length<3)return;
-    ctx.save();ctx.globalCompositeOperation='lighter';
+    ctx.save();ctx.globalCompositeOperation='screen';
+    // Pass 1: soft wide glow underneath
     for(let i=1;i<live.length-1;i++){
       const p=live[i],t=1-p.age/2;if(t<=0)continue;
-      ctx.strokeStyle=colors.hsl(t*60,t*t*.8);ctx.lineWidth=t*5+1;ctx.lineCap='round';
+      ctx.strokeStyle=colors.hsl(t*60,t*t*.25);ctx.lineWidth=t*10+3;ctx.lineCap='round';
+      const pv=live[i-1],nx=live[i+1];
+      ctx.beginPath();ctx.moveTo((pv.x+p.x)/2,(pv.y+p.y)/2);ctx.quadraticCurveTo(p.x,p.y,(p.x+nx.x)/2,(p.y+nx.y)/2);ctx.stroke();
+    }
+    // Pass 2: crisp bright core
+    for(let i=1;i<live.length-1;i++){
+      const p=live[i],t=1-p.age/2;if(t<=0)continue;
+      ctx.strokeStyle=colors.hsl(t*80,t*t*.85);ctx.lineWidth=t*4+.8;ctx.lineCap='round';
       const pv=live[i-1],nx=live[i+1];
       ctx.beginPath();ctx.moveTo((pv.x+p.x)/2,(pv.y+p.y)/2);ctx.quadraticCurveTo(p.x,p.y,(p.x+nx.x)/2,(p.y+nx.y)/2);ctx.stroke();
     }
@@ -332,30 +356,79 @@ class StrangeAttractor{
   constructor(){
     this.a=1.4;this.b=-2.3;this.c=2.4;this.d=-2.1;
     this.ta=this.a;this.tb=this.b;this.tc=this.c;this.td=this.d;
-    this.x=.1;this.y=.1;this.mt=0;
+    this.x=.1;this.y=.1;this.mt=0;this.time=0;
     this.offC=document.createElement('canvas');this.offCtx=this.offC.getContext('2d');
+    // Trail history for flowing lines
+    this.trail=[];this.maxTrail=600;
+    this.growPhase=0;
+    // Preset attractor parameter sets for variety
+    this.presets=[
+      {a:1.4,b:-2.3,c:2.4,d:-2.1},  // De Jong classic
+      {a:-2.0,b:-2.0,c:-1.2,d:2.0},  // Butterfly
+      {a:2.01,b:-2.53,c:1.61,d:-0.33}, // Web
+      {a:-0.709,b:1.638,c:0.452,d:1.740}, // Flower
+      {a:1.7,b:1.7,c:0.6,d:1.2},     // Spiral
+      {a:-1.32,b:-1.65,c:0.74,d:1.81}, // Star
+    ];
+    this.presetIdx=0;
   }
   update(dt){
-    this.mt+=dt;
-    if(this.mt>12){this.mt=0;this.ta=clamp(this.ta+(Math.random()-.5)*.4,-3,3);this.tb=clamp(this.tb+(Math.random()-.5)*.4,-3,3);this.tc=clamp(this.tc+(Math.random()-.5)*.4,-3,3);this.td=clamp(this.td+(Math.random()-.5)*.4,-3,3);}
-    const s=dt*.2;this.a=lerp(this.a,this.ta,s);this.b=lerp(this.b,this.tb,s);this.c=lerp(this.c,this.tc,s);this.d=lerp(this.d,this.td,s);
+    this.mt+=dt;this.time+=dt;this.growPhase+=dt*.25;
+    if(this.mt>10){
+      this.mt=0;
+      // Cycle through preset attractor types for more variety
+      this.presetIdx=(this.presetIdx+1)%this.presets.length;
+      const p=this.presets[this.presetIdx];
+      const drift=()=>(Math.random()-.5)*.15;
+      this.ta=p.a+drift();this.tb=p.b+drift();this.tc=p.c+drift();this.td=p.d+drift();
+    }
+    const s=dt*.12;this.a=lerp(this.a,this.ta,s);this.b=lerp(this.b,this.tb,s);this.c=lerp(this.c,this.tc,s);this.d=lerp(this.d,this.td,s);
   }
   draw(ctx,W,H,colors,audio){
     if(this.offC.width!==W||this.offC.height!==H){this.offC.width=W;this.offC.height=H;}
     const oc=this.offCtx;
-    oc.fillStyle='rgba(0,0,0,0.06)';oc.fillRect(0,0,W,H);
+    // Fade existing canvas — slower fade for longer trails
+    oc.fillStyle='rgba(0,0,0,0.035)';oc.fillRect(0,0,W,H);
     const cx=W/2,cy=H/2,sc=Math.min(W,H)*.22,{h}=colors.hslValues();
     let{x,y,a,b,c,d}=this;
-    const N=5000+(audio.bass*5000|0);
+    const N=6000+(audio.bass*6000|0);
+    // Collect points for line drawing
+    const newPts=[];
     for(let i=0;i<N;i++){
       const nx=Math.sin(a*y)-Math.cos(b*x),ny=Math.sin(c*x)-Math.cos(d*y);x=nx;y=ny;
       if(i<80)continue;
-      const ph=(h+i*.05)%360;
-      oc.fillStyle=`hsla(${ph|0},95%,65%,0.08)`;
-      oc.fillRect(cx+x*sc|0,cy+y*sc|0,2,2);
+      const px=cx+x*sc,py=cy+y*sc;
+      // Draw pixels on offscreen
+      const ph=(h+i*.08)%360;
+      oc.fillStyle=`hsla(${ph|0},95%,60%,0.06)`;
+      oc.fillRect(px|0,py|0,2,2);
+      // Sample points for flowing line
+      if(i%40===0)newPts.push({x:px,y:py,h:ph});
     }
     this.x=x;this.y=y;
-    ctx.save();ctx.globalCompositeOperation='screen';ctx.globalAlpha=.9;ctx.drawImage(this.offC,0,0);ctx.restore();
+    // Add to trail
+    for(const p of newPts){this.trail.push(p);if(this.trail.length>this.maxTrail)this.trail.shift();}
+    // Draw flowing connecting lines through trail
+    if(this.trail.length>4){
+      oc.save();oc.globalCompositeOperation='screen';
+      oc.lineWidth=1.2;oc.lineCap='round';
+      for(let seg=0;seg<this.trail.length-3;seg+=3){
+        const p0=this.trail[seg],p1=this.trail[seg+1],p2=this.trail[seg+2];
+        const age=seg/this.trail.length;
+        oc.strokeStyle=`hsla(${(p0.h+age*60)|0},90%,55%,${(.02+age*.06).toFixed(3)})`;
+        oc.beginPath();oc.moveTo(p0.x,p0.y);
+        oc.quadraticCurveTo(p1.x,p1.y,p2.x,p2.y);oc.stroke();
+      }
+      oc.restore();
+    }
+    // Glow nodes at recent trail points
+    const recent=this.trail.slice(-20);
+    for(let i=0;i<recent.length;i++){
+      const p=recent[i],pulse=.3+.7*Math.sin(this.growPhase*3+i*.5);
+      oc.fillStyle=`hsla(${(p.h+30)|0},100%,70%,${(.08*pulse).toFixed(3)})`;
+      oc.beginPath();oc.arc(p.x,p.y,3+pulse*3,0,TAU);oc.fill();
+    }
+    ctx.save();ctx.globalCompositeOperation='screen';ctx.globalAlpha=.85;ctx.drawImage(this.offC,0,0);ctx.restore();
   }
 }
 
@@ -363,15 +436,79 @@ class StrangeAttractor{
 // LISSAJOUS (audio-reactive parametric curves)
 // ═══════════════════════════════════════════
 class LissajousSystem{
-  constructor(){this.fA=3;this.fB=2;this.phase=0;}
-  update(dt,audio){this.phase+=dt*.25;this.fA=lerp(this.fA,2+(audio.mid*4|0),dt*.4);this.fB=lerp(this.fB,1+(audio.bass*3|0),dt*.4);}
+  constructor(){
+    this.fA=3;this.fB=2;this.phase=0;this.phaseB=0;
+    this.morphT=0;this.targetFA=3;this.targetFB=2;
+    this.growPhase=0;this.trailAlpha=0;
+    this.history=[];this.maxHist=8;
+  }
+  update(dt,audio){
+    this.phase+=dt*(.2+audio.mid*.15);
+    this.phaseB+=dt*(.13+audio.bass*.1);
+    this.growPhase+=dt*.4;
+    this.morphT+=dt;
+    // Evolve frequency ratios over time — targeting musical ratios
+    if(this.morphT>8){
+      this.morphT=0;
+      const ratios=[[2,3],[3,4],[3,5],[4,5],[5,6],[1,2],[2,5],[3,7],[5,8]];
+      const r=ratios[Math.random()*ratios.length|0];
+      this.targetFA=r[0]+audio.mid*2;this.targetFB=r[1]+audio.bass*1.5;
+    }
+    this.fA=lerp(this.fA,this.targetFA,dt*.15);
+    this.fB=lerp(this.fB,this.targetFB,dt*.15);
+    this.trailAlpha=lerp(this.trailAlpha,.6,dt*.3);
+    // Store trail history for ghost effect
+    if(this.history.length>=this.maxHist)this.history.shift();
+    this.history.push({fA:this.fA,fB:this.fB,phase:this.phase,phaseB:this.phaseB});
+  }
   draw(ctx,cx,cy,size,colors,audio){
     ctx.save();ctx.globalCompositeOperation='screen';
-    for(let pass=0;pass<3;pass++){
-      ctx.lineWidth=pass===0?4:pass===1?2:.8;
-      ctx.beginPath();
-      for(let i=0;i<=512;i++){const t=(i/512)*TAU,x=cx+Math.sin(this.fA*t+this.phase)*size*(1+pass*.02),y=cy+Math.sin(this.fB*t)*size*(1+pass*.02);i===0?ctx.moveTo(x,y):ctx.lineTo(x,y);}
-      ctx.strokeStyle=colors.hsl(-40+pass*60,.7+audio.volume*.3-pass*.15);ctx.stroke();
+    const grow=.5+.5*Math.sin(this.growPhase);
+    const sz=size*(1+grow*.15);
+    // Ghost trails of previous states
+    for(let g=0;g<this.history.length;g++){
+      const h=this.history[g],ga=g/this.history.length;
+      ctx.globalAlpha=ga*.12;ctx.lineWidth=1;ctx.beginPath();
+      for(let i=0;i<=256;i++){
+        const t=(i/256)*TAU;
+        const x=cx+Math.sin(h.fA*t+h.phase)*sz*.98;
+        const y=cy+Math.sin(h.fB*t+h.phaseB)*sz*.98;
+        i===0?ctx.moveTo(x,y):ctx.lineTo(x,y);
+      }
+      ctx.strokeStyle=colors.hsl(-80+g*20,.2);ctx.stroke();
+    }
+    ctx.globalAlpha=1;
+    // Main curve — 5 passes with varying harmonics for richness
+    for(let pass=0;pass<5;pass++){
+      const harmonic=1+pass*.08;
+      const wobble=Math.sin(this.growPhase+pass)*.03;
+      const thickness=pass===0?4.5:pass===1?2.8:pass===2?1.8:pass===3?1:.5;
+      ctx.lineWidth=thickness;ctx.beginPath();
+      for(let i=0;i<=600;i++){
+        const t=(i/600)*TAU;
+        const extraX=Math.sin((this.fA+pass)*t*harmonic+this.phase*.7)*sz*.04*pass;
+        const extraY=Math.cos((this.fB+pass*.5)*t*harmonic+this.phaseB*.5)*sz*.04*pass;
+        const x=cx+Math.sin(this.fA*t+this.phase)*sz*(1+wobble)+extraX;
+        const y=cy+Math.sin(this.fB*t+this.phaseB)*sz*(1+wobble)+extraY;
+        i===0?ctx.moveTo(x,y):ctx.lineTo(x,y);
+      }
+      const hueShift=-60+pass*45;
+      ctx.strokeStyle=colors.hsl(hueShift,.75+audio.volume*.25-pass*.08);
+      ctx.shadowColor=colors.hsl(hueShift,.3);
+      ctx.shadowBlur=pass===0?12:pass===1?6:0;
+      ctx.stroke();
+    }
+    ctx.shadowBlur=0;
+    // Intersection glow nodes where curves cross near center
+    const nodeCount=Math.round(this.fA+this.fB)*2;
+    for(let i=0;i<nodeCount;i++){
+      const t=(i/nodeCount)*TAU;
+      const x=cx+Math.sin(this.fA*t+this.phase)*sz;
+      const y=cy+Math.sin(this.fB*t+this.phaseB)*sz;
+      const pulse=.3+.7*Math.abs(Math.sin(this.growPhase*2+i*.8));
+      const nr=2+pulse*4;
+      ctx.fillStyle=colors.hsl(i*(360/nodeCount),.6*pulse);
+      ctx.beginPath();ctx.arc(x,y,nr,0,TAU);ctx.fill();
     }
     ctx.restore();
   }
@@ -381,25 +518,75 @@ class LissajousSystem{
 // FOURIER MANDALA (epicycle sum, N-fold symmetric)
 // ═══════════════════════════════════════════
 class FourierMandala{
-  constructor(){this.t=0;this.sym=6;}
-  setSym(n){this.sym=n;}
-  update(dt){this.t+=dt*.15;}
+  constructor(){this.t=0;this.sym=6;this.targetSym=6;this.symT=0;this.growPhase=0;this.layerCount=3;this.targetLayers=5;this.layerGrow=0;}
+  setSym(n){this.targetSym=n;}
+  update(dt,audio){
+    this.t+=dt*(.12+((audio||{}).bass||0)*.08);
+    this.growPhase+=dt*.3;
+    this.symT+=dt;
+    // Evolve symmetry order over time
+    if(this.symT>15){this.symT=0;this.targetSym=[4,5,6,7,8,9,10,12][Math.random()*8|0];}
+    this.sym=lerp(this.sym,this.targetSym,dt*.1);
+    // Grow layers
+    this.layerGrow+=dt*.15;
+    if(this.layerGrow>1){this.layerGrow=0;if(this.layerCount<this.targetLayers)this.layerCount++;else{this.targetLayers=2+Math.random()*4|0;this.layerCount=Math.max(2,this.layerCount-1);}}
+  }
   draw(ctx,cx,cy,size,colors,audio){
-    const N=this.sym,freqs=[N,N*2,N*3,N*4,N*5,N*6];
-    const bAmps=[.48,.22,.13,.08,.05,.03];
-    const mods=[1+audio.bass*.6,1+audio.mid*.4,1+audio.treble*.3,1+audio.bass*.2,1+audio.mid*.15,1+audio.treble*.1];
-    const steps=N*24;
+    if(!audio)audio={bass:0,mid:0,treble:0,volume:0};
+    const N=Math.round(this.sym),freqs=[N,N*2,N*3,N*4,N*5,N*6,N*7,N*8];
+    const bAmps=[.48,.22,.13,.08,.05,.03,.02,.015];
+    const mods=[1+audio.bass*.6,1+audio.mid*.4,1+audio.treble*.3,1+audio.bass*.2,1+audio.mid*.15,1+audio.treble*.1,1+audio.bass*.1,1+audio.mid*.08];
+    const steps=N*28;
+    const breathe=.9+.2*Math.sin(this.growPhase);
     ctx.save();ctx.globalCompositeOperation='screen';
-    for(let pass=0;pass<2;pass++){
-      ctx.beginPath();
+    // Multiple nested layers at different scales — each grows in
+    for(let layer=0;layer<this.layerCount;layer++){
+      const layerAlpha=clamp(this.layerCount-layer,0,1);
+      const layerScale=breathe*(.3+layer*.22)*(1+.08*Math.sin(this.growPhase+layer*1.2));
+      const layerRot=this.t*.05*(layer%2===0?1:-1)+layer*.3;
+      const layerSize=size*layerScale;
+      // Build path points
+      const pts=[];
       for(let s=0;s<=steps;s++){
-        const t=(s/steps)*TAU;let x=0,y=0;
-        for(let i=0;i<freqs.length;i++){const amp=size*bAmps[i]*mods[i],ph=this.t*(i*.12+.04);x+=Math.cos(freqs[i]*t+ph)*amp;y+=Math.sin(freqs[i]*t+ph)*amp;}
-        s===0?ctx.moveTo(cx+x,cy+y):ctx.lineTo(cx+x,cy+y);
+        const t=(s/steps)*TAU+layerRot;let x=0,y=0;
+        for(let i=0;i<freqs.length;i++){
+          const amp=layerSize*bAmps[i]*mods[i]*(1+.1*Math.sin(this.growPhase+i+layer));
+          const ph=this.t*(i*.12+.04)+layer*.5;
+          x+=Math.cos(freqs[i]*t+ph)*amp;y+=Math.sin(freqs[i]*t+ph)*amp;
+        }
+        pts.push({x:cx+x,y:cy+y});
       }
-      ctx.closePath();
-      ctx.strokeStyle=colors.hsl(pass===0?80:160,.8+audio.volume*.2);
-      ctx.lineWidth=pass===0?3:1.5;ctx.stroke();
+      // Filled shape for inner layers (subtle)
+      if(layer<this.layerCount-1){
+        ctx.globalAlpha=layerAlpha*.12;
+        ctx.fillStyle=colors.hsl(layer*50+80,.3);
+        ctx.beginPath();
+        for(let s=0;s<pts.length;s++)s===0?ctx.moveTo(pts[s].x,pts[s].y):ctx.lineTo(pts[s].x,pts[s].y);
+        ctx.closePath();ctx.fill();
+      }
+      // Stroked outline — 3 passes for glow depth
+      for(let pass=0;pass<3;pass++){
+        ctx.globalAlpha=layerAlpha*(.9-pass*.25);
+        ctx.beginPath();
+        for(let s=0;s<pts.length;s++)s===0?ctx.moveTo(pts[s].x,pts[s].y):ctx.lineTo(pts[s].x,pts[s].y);
+        ctx.closePath();
+        const hue=layer*40+pass*70+80;
+        ctx.strokeStyle=colors.hsl(hue,.75+audio.volume*.25-pass*.12);
+        ctx.lineWidth=(pass===0?3.5:pass===1?2:1)*(1-.1*layer);
+        ctx.shadowColor=pass===0?colors.hsl(hue,.3):'transparent';
+        ctx.shadowBlur=pass===0?10:0;
+        ctx.stroke();
+      }
+    }
+    ctx.shadowBlur=0;
+    // Center rosette — small inner detail
+    ctx.globalAlpha=.7;
+    const rN=Math.round(this.sym)*2;
+    for(let i=0;i<rN;i++){
+      const a=(i/rN)*TAU+this.t*.2;
+      const r=size*.06*(1+.3*Math.sin(this.growPhase*2+i));
+      ctx.fillStyle=colors.hsl(i*(360/rN),.5);
+      ctx.beginPath();ctx.arc(cx+Math.cos(a)*r,cy+Math.sin(a)*r,2+Math.sin(this.growPhase+i)*.8,0,TAU);ctx.fill();
     }
     ctx.restore();
   }
@@ -469,9 +656,14 @@ class GeometryEngine{
   }
   draw(ctx,W,H,colors,breath){
     const sz=Math.min(W,H)*.3*breath.scale*this.ps*(.8+this.growCur*.4);
-    ctx.save();ctx.globalCompositeOperation='lighter';ctx.translate(this.cx,this.cy);ctx.rotate(this.rot);
-    if(this.tp<1){ctx.globalAlpha=clamp(1-this.tp*.5,0,1);this._dp(ctx,this.pats[this.cur],sz,colors,breath);ctx.globalAlpha=clamp(this.tp,0,1);this._dp(ctx,this.pats[this.nxt],sz,colors,breath);}
-    else{ctx.globalAlpha=1;this._dp(ctx,this.pats[this.cur],sz,colors,breath);}
+    ctx.save();ctx.globalCompositeOperation='screen';ctx.translate(this.cx,this.cy);ctx.rotate(this.rot);
+    if(this.tp<1){
+      // Smooth crossfade: old fades out fully, new fades in — never both at full
+      const fadeOut=Math.cos(this.tp*Math.PI*.5); // 1→0 smooth
+      const fadeIn=Math.sin(this.tp*Math.PI*.5);  // 0→1 smooth
+      ctx.globalAlpha=clamp(fadeOut*.85,0,.85);this._dp(ctx,this.pats[this.cur],sz,colors,breath);
+      ctx.globalAlpha=clamp(fadeIn*.85,0,.85);this._dp(ctx,this.pats[this.nxt],sz,colors,breath);
+    }else{ctx.globalAlpha=.85;this._dp(ctx,this.pats[this.cur],sz,colors,breath);}
     ctx.restore();
   }
   _dp(ctx,name,sz,co,br){
@@ -781,35 +973,62 @@ class CollatzTree{
     ctx.translate(W/2,H/2);
     ctx.scale(this.viewScale*scaleX,this.viewScale);
     ctx.translate(-W/2-this.viewCX,-H/2-this.viewCY);
+    const branchGlow=.5+.5*Math.sin(this.time*.8);
     for(let si=0;si<this.seqs.length;si++){
       const seq=this.seqs[si];
       const visCount=Math.min(seq.length,maxVisible-si*2);
       if(visCount<3)continue;
-      ctx.beginPath();
+      // Build path points first for multi-pass rendering
+      const pts=[{x:cx,y:by}];
       let x=cx,y=by,angle=-Math.PI/2;
-      ctx.moveTo(x,y);
       for(let j=1;j<visCount;j++){
         const prevVal=seq[j-1];
         const turn=prevVal%2===0?-angleStep:angleStep;
         const sway=Math.sin(this.swayPhase+j*.15+si*.3)*.03*(j/visCount);
-        angle+=turn+sway;
+        const breathe=.02*Math.sin(this.time*1.5+j*.2+si)*(j/visCount);
+        angle+=turn+sway+breathe;
         const sl=segLen*bassPulse*(1+audio.bass*.2*Math.sin(this.time*3+j));
         x+=Math.cos(angle)*sl;y+=Math.sin(angle)*sl;
-        ctx.lineTo(x,y);
+        pts.push({x,y});
       }
       if(x<minX)minX=x;if(x>maxX)maxX=x;if(y<minY)minY=y;if(y>maxY)maxY=y;
       const depthRatio=Math.min(1,visCount/60);
-      const hue=(280+depthRatio*180)%360;
-      const sat=95,lit=55+depthRatio*15;
-      const lw=Math.max(.8,3.5-depthRatio*2.5);
-      ctx.strokeStyle=`hsla(${hue|0},${sat}%,${lit|0}%,${(.5+depthRatio*.4).toFixed(2)})`;
-      ctx.lineWidth=lw/this.viewScale;ctx.lineJoin='round';ctx.lineCap='round';ctx.stroke();
-      if(visCount>15&&depthRatio>.3){
-        const tipHue=(280+depthRatio*180)%360;
-        const gr=4+audio.bass*6;
+      const hue=(280+depthRatio*180+si*3)%360;
+      const sat=92+depthRatio*8,lit=50+depthRatio*20;
+      // Pass 1: thick glow base
+      ctx.beginPath();
+      for(let j=0;j<pts.length;j++)j===0?ctx.moveTo(pts[j].x,pts[j].y):ctx.lineTo(pts[j].x,pts[j].y);
+      const baseLw=Math.max(1.2,4.5-depthRatio*3);
+      ctx.strokeStyle=`hsla(${hue|0},${sat|0}%,${(lit*.7)|0}%,${(.15+depthRatio*.15).toFixed(2)})`;
+      ctx.lineWidth=(baseLw+2)/this.viewScale;ctx.lineJoin='round';ctx.lineCap='round';
+      ctx.shadowColor=`hsla(${hue|0},100%,60%,${(.2*branchGlow).toFixed(2)})`;
+      ctx.shadowBlur=8;ctx.stroke();ctx.shadowBlur=0;
+      // Pass 2: crisp main line with tapering
+      ctx.beginPath();
+      for(let j=0;j<pts.length;j++)j===0?ctx.moveTo(pts[j].x,pts[j].y):ctx.lineTo(pts[j].x,pts[j].y);
+      ctx.strokeStyle=`hsla(${hue|0},${sat|0}%,${lit|0}%,${(.5+depthRatio*.45).toFixed(2)})`;
+      ctx.lineWidth=baseLw/this.viewScale;ctx.stroke();
+      // Buds/leaves at branch points where direction changes significantly
+      for(let j=2;j<pts.length;j++){
+        const prevVal=seq[j-1];
+        if(prevVal%2===1&&j>visCount*.6){
+          // Odd Collatz values = branch points — draw small leaf buds
+          const budSize=(1.5+2*depthRatio+audio.bass*2)/this.viewScale;
+          const budPhase=this.time*2+j*.7+si*.3;
+          const budR=budSize*(1+.4*Math.sin(budPhase));
+          const budHue=(hue+60+j*5)%360;
+          ctx.fillStyle=`hsla(${budHue|0},100%,${60+10*Math.sin(budPhase)|0}%,${(.3+.3*Math.sin(budPhase)).toFixed(2)})`;
+          ctx.beginPath();ctx.arc(pts[j].x,pts[j].y,budR,0,TAU);ctx.fill();
+        }
+      }
+      // Tip glow — larger and more colorful
+      if(visCount>10&&depthRatio>.2){
+        const tipHue=(hue+90)%360;
+        const gr=(5+audio.bass*8+branchGlow*4)/this.viewScale;
         const g=ctx.createRadialGradient(x,y,0,x,y,gr);
-        g.addColorStop(0,`hsla(${tipHue|0},100%,75%,.7)`);
-        g.addColorStop(1,`hsla(${tipHue|0},100%,60%,0)`);
+        g.addColorStop(0,`hsla(${tipHue|0},100%,75%,.6)`);
+        g.addColorStop(.5,`hsla(${tipHue|0},100%,60%,.2)`);
+        g.addColorStop(1,`hsla(${tipHue|0},100%,50%,0)`);
         ctx.fillStyle=g;ctx.beginPath();ctx.arc(x,y,gr,0,TAU);ctx.fill();
       }
     }
@@ -871,15 +1090,21 @@ class GameOfLife{
     for(let i=0;i<this.N;i++){
       if(!grid[i]){d[i*4]=0;d[i*4+1]=0;d[i*4+2]=0;d[i*4+3]=0;continue;}
       const a=age[i];
-      if(a<2){d[i*4]=255;d[i*4+1]=255;d[i*4+2]=255;d[i*4+3]=255;}
-      else{
+      if(a<2){
+        // Young cells — bright tinted rather than pure white
+        const yh=((hBase+a*30)%360)/360;
+        d[i*4]=Math.min(255,(Math.sin(yh*TAU)*40+210)|0);
+        d[i*4+1]=Math.min(255,(Math.sin((yh+.33)*TAU)*40+200)|0);
+        d[i*4+2]=Math.min(255,(Math.sin((yh+.66)*TAU)*40+220)|0);
+        d[i*4+3]=230;
+      }else{
         const hue=(hBase+a*12)%360,hr=hue/360;
         const r=Math.sin(hr*TAU)*127+128,g=Math.sin((hr+.33)*TAU)*127+128,b=Math.sin((hr+.66)*TAU)*127+128;
-        d[i*4]=Math.min(255,(r*1.6)|0);d[i*4+1]=Math.min(255,(g*1.6)|0);d[i*4+2]=Math.min(255,(b*1.6)|0);d[i*4+3]=255;
+        d[i*4]=Math.min(240,(r*1.4)|0);d[i*4+1]=Math.min(240,(g*1.4)|0);d[i*4+2]=Math.min(240,(b*1.4)|0);d[i*4+3]=255;
       }
     }
     this.offCtx.putImageData(imgData,0,0);
-    ctx.save();ctx.globalCompositeOperation='screen';ctx.globalAlpha=.85;
+    ctx.save();ctx.globalCompositeOperation='screen';ctx.globalAlpha=.7;
     ctx.imageSmoothingEnabled=false;
     ctx.drawImage(this.offC,0,0,W,H);ctx.restore();
   }
@@ -892,14 +1117,17 @@ class SceneDirector{
   constructor(){
     this.scenes=SCENES;this.cur=0;this.nxt=1;
     this.timer=0;this.duration=15+Math.random()*15;
-    this.fadeT=0;this.fading=false;this.fadeDur=3;
+    this.fadeT=0;this.fading=false;this.fadeDur=4.5;
     this.weights={};this.targetWeights={};
     this._applyScene(0);
   }
   _applyScene(idx){
     const sc=this.scenes[idx]||this.scenes[0];
     if(!sc)return;
+    // Zero out ALL known layers first so departing layers fade out
+    const allLayers=['collatz','gol','rd','attractor','geometry','lissajous','fourier','tunnel','particles'];
     this.targetWeights={};
+    for(const k of allLayers)this.targetWeights[k]=0;
     for(const[k,v]of Object.entries(sc.layers))this.targetWeights[k]=v;
   }
   currentScene(){return this.scenes[this.cur];}
@@ -922,7 +1150,11 @@ class SceneDirector{
     this.timer+=dt;
     // Blend weights toward targets
     for(const k of Object.keys(this.targetWeights)){
-      this.weights[k]=lerp(this.weights[k]||0,this.targetWeights[k],dt*.8);
+      // Ease-in-out weight transition — slower for smoother scene crossfades
+      const cur=this.weights[k]||0,tgt=this.targetWeights[k];
+      const speed=tgt>cur?dt*.5:dt*.6; // slightly faster fade-out than fade-in
+      this.weights[k]=lerp(cur,tgt,speed);
+      if(Math.abs(this.weights[k]-tgt)<.005)this.weights[k]=tgt;
     }
     // Early scene change on big bass hit
     const bassForce=audio.bass>.7&&this.timer>8;
@@ -1479,7 +1711,7 @@ class App{
       this.ripples.update(dt);
       this.geometry.update(dt,this.breath,this.W,this.H,this.down,this.mx,this.my,this.timeSys);
       this.attractor.update(dt);this.lissajous.update(dt,audio);
-      this.fourier.update(dt);this.rd.update(audio.bass);
+      this.fourier.update(dt,audio);this.rd.update(audio.bass);
       if(this._layerActive('tunnel'))this.tunnel.update(dt,audio,this.breath,this.timeSys);
       if(this._layerActive('collatz'))this.collatz.update(dt,audio);
       if(this._layerActive('gol'))this.gol.update(dt,audio);
@@ -1568,9 +1800,9 @@ class App{
     if(cam)ctx.restore();
 
     // Flash
-    const bassPulseA=Math.max(0,audio.bass-.5)*.35;
-    const totalFlash=Math.max(this.flashA,bassPulseA);
-    if(totalFlash>.005){ctx.save();ctx.globalCompositeOperation='screen';ctx.fillStyle=`hsla(${this.colors.hslValues().h|0},80%,80%,${totalFlash.toFixed(3)})`;ctx.fillRect(0,0,W,H);ctx.restore();}
+    const bassPulseA=Math.max(0,audio.bass-.5)*.2;
+    const totalFlash=Math.min(.25,Math.max(this.flashA*.7,bassPulseA));
+    if(totalFlash>.005){ctx.save();ctx.globalCompositeOperation='screen';ctx.fillStyle=`hsla(${this.colors.hslValues().h|0},85%,55%,${totalFlash.toFixed(3)})`;ctx.fillRect(0,0,W,H);ctx.restore();}
 
     // Vignette — reduced alpha for vibrancy
     const vig=ctx.createRadialGradient(W/2,H/2,Math.min(W,H)*.35,W/2,H/2,Math.max(W,H)*.8);
