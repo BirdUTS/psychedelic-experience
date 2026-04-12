@@ -30,6 +30,11 @@ canvas{display:block;width:100vw;height:100vh;cursor:none;}
 .hud-btn.off{opacity:.45;}
 #phase-label{position:fixed;top:14px;left:50%;transform:translateX(-50%);font-family:Georgia,serif;font-size:.65rem;letter-spacing:.2em;color:rgba(200,140,255,.7);z-index:20;pointer-events:none;opacity:0;transition:opacity .8s;}
 #phase-label.visible{opacity:1;}
+#controls{position:fixed;top:14px;right:14px;display:flex;gap:8px;z-index:25;opacity:0;transition:opacity .5s;pointer-events:none;}
+#controls.visible{opacity:1;pointer-events:all;}
+.ctrl-btn{width:36px;height:36px;border:1px solid rgba(160,100,220,.35);border-radius:50%;background:rgba(10,0,30,.5);color:rgba(200,160,255,.7);font-size:16px;cursor:pointer;transition:all .3s;display:flex;align-items:center;justify-content:center;backdrop-filter:blur(4px);padding:0;line-height:1;}
+.ctrl-btn:hover{border-color:rgba(200,150,255,.7);background:rgba(60,20,120,.5);color:#e0c0ff;}
+.ctrl-btn.active{background:rgba(40,180,100,.25);border-color:rgba(100,255,180,.5);color:#80ffcc;}
 </style>
 </head>
 <body>
@@ -38,11 +43,11 @@ canvas{display:block;width:100vw;height:100vh;cursor:none;}
   <div id="mode-panels">
     <div class="mode-panel" id="panel-stationary">
       <canvas id="preview-stationary"></canvas>
-      <div class="mode-label"><div class="zh">定點觀看</div><div class="en">Stationary</div></div>
+      <div class="mode-label"><div class="zh">Observe</div><div class="en">float in stillness</div></div>
     </div>
     <div class="mode-panel" id="panel-journey">
       <canvas id="preview-journey"></canvas>
-      <div class="mode-label"><div class="zh">異世界行動</div><div class="en">Journey</div></div>
+      <div class="mode-label"><div class="zh">Journey</div><div class="en">drift through worlds</div></div>
     </div>
   </div>
   <button id="mic-btn">🎤 Enable Microphone</button>
@@ -58,6 +63,11 @@ canvas{display:block;width:100vw;height:100vh;cursor:none;}
   <button class="hud-btn on" data-layer="tunnel">Tunnel</button>
   <button class="hud-btn on" data-layer="collatz">Collatz</button>
   <button class="hud-btn on" data-layer="gol">Life</button>
+</div>
+<div id="controls">
+  <button class="ctrl-btn" id="btn-mic" title="Microphone">🎤</button>
+  <button class="ctrl-btn" id="btn-mute" title="Mute Sound">🔊</button>
+  <button class="ctrl-btn" id="btn-fs" title="Fullscreen">⛶</button>
 </div>
 <div id="phase-label"></div>
 <script>
@@ -538,6 +548,11 @@ class CollatzTree{
   constructor(){
     this.maxN=80;this.targetN=250;this.seqs=[];this.growT=0;this.growSpeed=.4;
     this.swayPhase=0;this.time=0;
+    // Viewport tracking
+    this.viewCX=0;this.viewCY=0;this.viewScale=1;
+    this.targetCX=0;this.targetCY=0;this.targetScale=1;
+    // 3D rotation feel
+    this.rotY=0;this.rotPhase=0;
     this._precompute();
   }
   _collatz(n){const seq=[n];while(n!==1&&seq.length<200){n=n%2===0?n/2:3*n+1;seq.push(n);}return seq.reverse();}
@@ -546,47 +561,66 @@ class CollatzTree{
     this.time+=dt;this.swayPhase+=dt*(.6+audio.mid*.8);
     this.growT+=dt*this.growSpeed*(1+audio.bass*.5);
     if(this.maxN<this.targetN&&this.growT>this.seqs.length*.06){this.maxN=Math.min(this.targetN,this.maxN+5);this._precompute();}
+    // 3D rotation feel
+    this.rotPhase+=dt*.15;this.rotY=Math.sin(this.rotPhase)*.25;
+    // Smooth tracking viewport
+    this.viewCX=lerp(this.viewCX,this.targetCX,dt*1.2);
+    this.viewCY=lerp(this.viewCY,this.targetCY,dt*1.2);
+    this.viewScale=lerp(this.viewScale,this.targetScale,dt*.8);
   }
   draw(ctx,W,H,colors,audio){
     const cx=W/2,by=H*.92,segLen=Math.min(H,W)*.018,angleStep=7*Math.PI/180;
     const maxVisible=Math.floor(this.growT*15);
     const bassPulse=1+audio.bass*.4;
+    // Compute bounding box for tracking
+    let minX=cx,maxX=cx,minY=by,maxY=by;
     ctx.save();ctx.globalCompositeOperation='screen';
+    // Apply 3D rotation perspective + tracking viewport
+    const cosR=Math.cos(this.rotY),scaleX=cosR*.3+.7; // foreshorten X for 3D feel
+    ctx.translate(W/2,H/2);
+    ctx.scale(this.viewScale*scaleX,this.viewScale);
+    ctx.translate(-W/2-this.viewCX,-H/2-this.viewCY);
     for(let si=0;si<this.seqs.length;si++){
       const seq=this.seqs[si];
       const visCount=Math.min(seq.length,maxVisible-si*2);
       if(visCount<3)continue;
-      // Draw as a single flowing path per sequence
       ctx.beginPath();
       let x=cx,y=by,angle=-Math.PI/2;
       ctx.moveTo(x,y);
       for(let j=1;j<visCount;j++){
         const prevVal=seq[j-1];
         const turn=prevVal%2===0?-angleStep:angleStep;
-        // Sway like seaweed — deeper = more sway
         const sway=Math.sin(this.swayPhase+j*.15+si*.3)*.03*(j/visCount);
         angle+=turn+sway;
         const sl=segLen*bassPulse*(1+audio.bass*.2*Math.sin(this.time*3+j));
         x+=Math.cos(angle)*sl;y+=Math.sin(angle)*sl;
         ctx.lineTo(x,y);
       }
-      // Color: depth-based gradient — purple trunk → red → orange → yellow → green tips
+      if(x<minX)minX=x;if(x>maxX)maxX=x;if(y<minY)minY=y;if(y>maxY)maxY=y;
       const depthRatio=Math.min(1,visCount/60);
-      const hue=(280+depthRatio*180)%360; // 280(purple) → 100(green)
+      const hue=(280+depthRatio*180)%360;
       const sat=95,lit=55+depthRatio*15;
-      const lw=Math.max(.8,3.5-depthRatio*2.5); // thick trunk, thin tips
+      const lw=Math.max(.8,3.5-depthRatio*2.5);
       ctx.strokeStyle=`hsla(${hue|0},${sat}%,${lit|0}%,${(.5+depthRatio*.4).toFixed(2)})`;
-      ctx.lineWidth=lw;ctx.lineJoin='round';ctx.lineCap='round';ctx.stroke();
-      // Bright tip glow on the longest branches
+      ctx.lineWidth=lw/this.viewScale;ctx.lineJoin='round';ctx.lineCap='round';ctx.stroke();
       if(visCount>15&&depthRatio>.3){
         const tipHue=(280+depthRatio*180)%360;
-        const g=ctx.createRadialGradient(x,y,0,x,y,4+audio.bass*6);
+        const gr=4+audio.bass*6;
+        const g=ctx.createRadialGradient(x,y,0,x,y,gr);
         g.addColorStop(0,`hsla(${tipHue|0},100%,75%,.7)`);
         g.addColorStop(1,`hsla(${tipHue|0},100%,60%,0)`);
-        ctx.fillStyle=g;ctx.beginPath();ctx.arc(x,y,4+audio.bass*6,0,TAU);ctx.fill();
+        ctx.fillStyle=g;ctx.beginPath();ctx.arc(x,y,gr,0,TAU);ctx.fill();
       }
     }
     ctx.restore();
+    // Update tracking targets — center the tree and zoom to fit
+    const treeCX=(minX+maxX)/2,treeCY=(minY+maxY)/2;
+    const treeW=maxX-minX+60,treeH=maxY-minY+60;
+    if(treeW>10&&treeH>10){
+      this.targetCX=treeCX-W/2;this.targetCY=treeCY-H/2;
+      const fitScale=Math.min(W/treeW,H/treeH,1.8);
+      this.targetScale=clamp(fitScale,.4,1.8);
+    }
   }
 }
 
@@ -662,15 +696,17 @@ class SceneDirector{
     this._applyScene(0);
   }
   _applyScene(idx){
-    const sc=this.scenes[idx];
+    const sc=this.scenes[idx]||this.scenes[0];
+    if(!sc)return;
     this.targetWeights={};
     for(const[k,v]of Object.entries(sc.layers))this.targetWeights[k]=v;
   }
   currentScene(){return this.scenes[this.cur];}
   blendedScene(){
-    if(!this.fading)return this.scenes[this.cur];
+    const fallback=this.scenes[0];
+    if(!this.fading)return this.scenes[this.cur]||fallback;
     const t=clamp(this.fadeT/this.fadeDur,0,1);
-    const a=this.scenes[this.cur],b=this.scenes[this.nxt];
+    const a=this.scenes[this.cur]||fallback,b=this.scenes[this.nxt]||fallback;
     return{
       name:t<.5?a.name:b.name,
       hMin:lerp(a.hMin,b.hMin,t),hMax:lerp(a.hMax,b.hMax,t),
@@ -707,8 +743,8 @@ class SceneDirector{
     colors.setScene(sc);
   }
   sceneName(){
-    if(this.fading){const t=this.fadeT/this.fadeDur;return t<.5?this.scenes[this.cur].name:this.scenes[this.nxt].name;}
-    return this.scenes[this.cur].name;
+    if(this.fading){const t=this.fadeT/this.fadeDur;return t<.5?(this.scenes[this.cur]||this.scenes[0]).name:(this.scenes[this.nxt]||this.scenes[0]).name;}
+    return (this.scenes[this.cur]||this.scenes[0]).name;
   }
   justTransitioned(){return this.fading&&this.fadeT<1.5;}
 }
@@ -824,10 +860,10 @@ class SoundEngine{
     this.holdGain=this.ctx.createGain();this.holdGain.gain.value=0;this.holdGain.connect(this.reverb);
     this.holdOsc=this.ctx.createOscillator();this.holdOsc.type='sine';this.holdOsc.frequency.value=220;this.holdOsc.connect(this.holdGain);this.holdOsc.start();
     // === Ambient responsive layer — ethereal mechanical voices ===
-    this.ambFilter=this.ctx.createBiquadFilter();this.ambFilter.type='bandpass';this.ambFilter.frequency.value=1200;this.ambFilter.Q.value=4;this.ambFilter.connect(this.reverb);
+    this.ambFilter=this.ctx.createBiquadFilter();this.ambFilter.type='lowpass';this.ambFilter.frequency.value=900;this.ambFilter.Q.value=1.5;this.ambFilter.connect(this.reverb);
     this.ambMaster=this.ctx.createGain();this.ambMaster.gain.value=0;this.ambMaster.connect(this.ambFilter);
-    // 3 detuned whisper oscillators (different waveforms for mechanical/organic blend)
-    ['sine','triangle','sawtooth'].forEach((type,i)=>{
+    // 3 detuned whisper oscillators (soft ethereal blend)
+    ['sine','sine','triangle'].forEach((type,i)=>{
       const o=this.ctx.createOscillator(),g=this.ctx.createGain();
       o.type=type;o.frequency.value=440+i*220;o.detune.value=(i-1)*7;
       g.gain.value=0;o.connect(g);g.connect(this.ambMaster);o.start();
@@ -1049,11 +1085,30 @@ class App{
   }
 
   _setupEvents(){
+    this.muted=false;
+    // Entry mic button
     document.getElementById('mic-btn').addEventListener('click',e=>{
       e.stopPropagation();this.micEnabled=!this.micEnabled;
       const btn=document.getElementById('mic-btn');
       btn.classList.toggle('active',this.micEnabled);
       btn.textContent=this.micEnabled?'🎤 Microphone On':'🎤 Enable Microphone';
+    });
+    // In-experience control buttons
+    document.getElementById('btn-mic').addEventListener('click',e=>{
+      e.stopPropagation();this.micEnabled=!this.micEnabled;
+      document.getElementById('btn-mic').classList.toggle('active',this.micEnabled);
+      if(this.micEnabled&&this.sound.ok&&!this.mic.active)this.mic.init(this.sound.audioCtx);
+    });
+    document.getElementById('btn-mute').addEventListener('click',e=>{
+      e.stopPropagation();this.muted=!this.muted;
+      const btn=document.getElementById('btn-mute');
+      btn.textContent=this.muted?'🔇':'🔊';
+      if(this.sound.ok)this.sound.master.gain.setTargetAtTime(this.muted?0:.5,this.sound.ctx.currentTime,.1);
+    });
+    document.getElementById('btn-fs').addEventListener('click',e=>{
+      e.stopPropagation();
+      if(!document.fullscreenElement)document.documentElement.requestFullscreen?.();
+      else document.exitFullscreen?.();
     });
     // Mode selection panels
     document.getElementById('panel-stationary').addEventListener('click',e=>{e.stopPropagation();this._startExperience(false);});
@@ -1071,14 +1126,19 @@ class App{
     window.addEventListener('touchmove',e=>{e.preventDefault();const t=e.touches[0];this.pmx=this.mx;this.pmy=this.my;this.mx=t.clientX;this.my=t.clientY;const dx=this.mx-this.pmx,dy=this.my-this.pmy;this.vel=Math.sqrt(dx*dx+dy*dy);this.idleTime=0;if(this.spirits.active)this.spirits.fadeAll();},{passive:false});
     window.addEventListener('touchstart',e=>{if(!this.started||!this.modeSelect.isDone)return;const t=e.touches[0];this.mx=t.clientX;this.my=t.clientY;this.down=true;this.holdDur=0;this._onClick(this.mx,this.my);});
     window.addEventListener('touchend',()=>{if(this.down&&this.holdDur>.3)this._onRelease();this.down=false;this.holdDur=0;this.sound.releaseHold();});
-    let hudTimer=null;
+    let hudTimer=null;const ctrlEl=document.getElementById('controls');
     window.addEventListener('mousemove',()=>{
       if(!this.modeSelect.isDone)return;
       if(performance.now()/1000-this.entryTime<2)return;
-      this.hud.classList.add('visible');clearTimeout(hudTimer);
-      hudTimer=setTimeout(()=>this.hud.classList.remove('visible'),3000);
+      this.hud.classList.add('visible');ctrlEl.classList.add('visible');clearTimeout(hudTimer);
+      hudTimer=setTimeout(()=>{this.hud.classList.remove('visible');ctrlEl.classList.remove('visible');},4000);
     });
-    window.addEventListener('dblclick',()=>{if(!document.fullscreenElement)document.documentElement.requestFullscreen?.();else document.exitFullscreen?.();});
+    // Touch: show controls on tap
+    window.addEventListener('touchstart',()=>{
+      if(!this.modeSelect.isDone)return;
+      ctrlEl.classList.add('visible');this.hud.classList.add('visible');clearTimeout(hudTimer);
+      hudTimer=setTimeout(()=>{this.hud.classList.remove('visible');ctrlEl.classList.remove('visible');},4000);
+    },{passive:true});
   }
 
   _startExperience(isJourney){
@@ -1192,9 +1252,10 @@ class App{
   }
 
   _layerActive(name){
-    if(this.userOverrides.has(name))return this.layers[name];
+    if(this.userOverrides.has(name))return this.layers[name]?1:0;
     const w=this.director.getWeight(name);
-    return w>.15&&this.layers[name];
+    if(w<.02||!this.layers[name])return 0;
+    return w; // return weight for alpha-based fading
   }
 
   _renderMain(audio){
@@ -1215,29 +1276,32 @@ class App{
     // === Journey mode: apply sweeping camera transform to all content ===
     if(cam){ctx.save();cam.applyCanvasTransform(ctx,W,H);}
 
-    // Reaction-Diffusion
-    if(this._layerActive('rd'))this.rd.draw(ctx,W,H,this.colors,.6+audio.bass*.2);
+    // Each layer uses weight as globalAlpha for smooth fade transitions
+    let w;
 
-    // Strange Attractor
-    if(this._layerActive('attractor'))this.attractor.draw(ctx,W,H,this.colors,audio);
+    w=this._layerActive('rd');
+    if(w){ctx.save();ctx.globalAlpha=w;this.rd.draw(ctx,W,H,this.colors,.6+audio.bass*.2);ctx.restore();}
 
-    // Collatz Tree
-    if(this._layerActive('collatz'))this.collatz.draw(ctx,W,H,this.colors,audio);
+    w=this._layerActive('attractor');
+    if(w){ctx.save();ctx.globalAlpha=w;this.attractor.draw(ctx,W,H,this.colors,audio);ctx.restore();}
 
-    // Game of Life
-    if(this._layerActive('gol'))this.gol.draw(ctx,W,H,this.colors);
+    w=this._layerActive('collatz');
+    if(w){ctx.save();ctx.globalAlpha=w;this.collatz.draw(ctx,W,H,this.colors,audio);ctx.restore();}
 
-    // Sacred Geometry
-    if(this._layerActive('geometry')){ctx.save();const aScale=1+audio.bass*.08+audio.volume*.04;ctx.translate(W/2,H/2);ctx.scale(aScale,aScale);ctx.translate(-W/2,-H/2);this.geometry.draw(ctx,W,H,this.colors,this.breath);ctx.restore();}
+    w=this._layerActive('gol');
+    if(w){ctx.save();ctx.globalAlpha=w;this.gol.draw(ctx,W,H,this.colors);ctx.restore();}
 
-    // Lissajous
-    if(this._layerActive('lissajous'))this.lissajous.draw(ctx,W/2,H/2,Math.min(W,H)*.22*this.breath.scale,this.colors,audio);
+    w=this._layerActive('geometry');
+    if(w){ctx.save();ctx.globalAlpha=w;const aScale=1+audio.bass*.08+audio.volume*.04;ctx.translate(W/2,H/2);ctx.scale(aScale,aScale);ctx.translate(-W/2,-H/2);this.geometry.draw(ctx,W,H,this.colors,this.breath);ctx.restore();}
 
-    // Fourier Mandala
-    if(this._layerActive('fourier'))this.fourier.draw(ctx,W/2,H/2,Math.min(W,H)*.28,this.colors,audio);
+    w=this._layerActive('lissajous');
+    if(w){ctx.save();ctx.globalAlpha=w;this.lissajous.draw(ctx,W/2,H/2,Math.min(W,H)*.22*this.breath.scale,this.colors,audio);ctx.restore();}
 
-    // Tunnel
-    if(this._layerActive('tunnel'))this.tunnel.draw(ctx,W,H,this.colors,audio);
+    w=this._layerActive('fourier');
+    if(w){ctx.save();ctx.globalAlpha=w;this.fourier.draw(ctx,W/2,H/2,Math.min(W,H)*.28,this.colors,audio);ctx.restore();}
+
+    w=this._layerActive('tunnel');
+    if(w){ctx.save();ctx.globalAlpha=w;this.tunnel.draw(ctx,W,H,this.colors,audio);ctx.restore();}
 
     // Trail
     this.trail.draw(ctx,this.colors);
