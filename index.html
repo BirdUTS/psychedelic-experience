@@ -41,6 +41,7 @@ canvas{display:block;width:100vw;height:100vh;cursor:none;}
   <button class="hud-btn on" data-layer="lissajous">Lissajous</button>
   <button class="hud-btn on" data-layer="fourier">Mandala</button>
   <button class="hud-btn on" data-layer="particles">Particles</button>
+  <button class="hud-btn on" data-layer="tunnel">Tunnel</button>
 </div>
 <div id="phase-label"></div>
 <script>
@@ -56,10 +57,10 @@ const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
 // Phase 0 → 1 → 2 → 3, each unlocks more layers
 // Timings: 0s, 30s, 90s, 180s
 const PHASE_CONFIG=[
-  {name:'Awakening',  t:0,   layers:{rd:false,attractor:false,geometry:true, lissajous:false,fourier:false,particles:true}},
-  {name:'Opening',    t:30,  layers:{rd:true, attractor:false,geometry:true, lissajous:true, fourier:false,particles:true}},
-  {name:'Expanding',  t:90,  layers:{rd:true, attractor:true, geometry:true, lissajous:true, fourier:true, particles:true}},
-  {name:'Dissolution',t:180, layers:{rd:true, attractor:true, geometry:true, lissajous:true, fourier:true, particles:true}},
+  {name:'Awakening',  t:0,   layers:{rd:false,attractor:false,geometry:true, lissajous:false,fourier:false,particles:true, tunnel:false}},
+  {name:'Opening',    t:30,  layers:{rd:true, attractor:false,geometry:true, lissajous:true, fourier:false,particles:true, tunnel:true}},
+  {name:'Expanding',  t:90,  layers:{rd:true, attractor:true, geometry:true, lissajous:true, fourier:true, particles:true, tunnel:true}},
+  {name:'Dissolution',t:180, layers:{rd:true, attractor:true, geometry:true, lissajous:true, fourier:true, particles:true, tunnel:true}},
 ];
 
 // ═══════════════════════════════════════════
@@ -93,14 +94,26 @@ class BreathingSystem{
 }
 
 // ═══════════════════════════════════════════
-// TIME SYSTEM  (real clock → palette modulation)
+// TIME SYSTEM  (real clock → rich palette/speed/chaos modulation)
 // ═══════════════════════════════════════════
 class TimeSystem{
-  constructor(){this.hueShift=0;this.speedMod=1;}
+  constructor(){this.hueShift=0;this.speedMod=1;this.chaos=0;this.pulse=0;this.seed=0;this.minutePhase=0;this.secondWave=0;}
   update(){
-    const h=new Date().getHours();
+    const d=new Date(),h=d.getHours(),m=d.getMinutes(),s=d.getSeconds(),ms=d.getMilliseconds();
+    // Hourly hue shift (warm day / cool night)
     this.hueShift=h>=6&&h<11?25:h>=11&&h<16?0:h>=16&&h<21?-15:-35;
+    // Hourly speed (dreamy at night, lively by day)
     this.speedMod=h>=0&&h<6?.5:h>=12&&h<18?1.1:1.0;
+    // Minute-level: slow sine modulates geometry drift & particle behavior
+    this.minutePhase=(m+s/60)/60*TAU; // full cycle per hour
+    // Second-level: micro-variation for "every moment is unique"
+    this.secondWave=Math.sin((s+ms/1000)/60*TAU*5)*.5+.5; // ~5 waves per minute
+    // Temporal seed: changes every 7 seconds, shuffles rare event timing
+    this.seed=Math.floor((h*3600+m*60+s)/7);
+    // Chaos: higher at "liminal" times (midnight, 3am, dusk)
+    this.chaos=h>=0&&h<5?.6+.2*Math.sin(m/60*TAU):h>=17&&h<20?.3+.15*Math.sin(m/60*TAU):.1;
+    // Pulse: a slow beat derived from real seconds (creates subtle rhythm)
+    this.pulse=.5+.5*Math.sin((s+ms/1000)*TAU/5); // 5-second real-time breath
   }
 }
 
@@ -110,7 +123,7 @@ class TimeSystem{
 class ColorSystem{
   constructor(){this.hueBase=Math.random()*360;this.m=MODES.mystic;}
   setMode(n){this.m=MODES[n]||MODES.mystic;}
-  update(dt,ts){this.hueBase+=(dt*5*(this.m.spd||1)+(ts?ts.hueShift*.002:0));if(this.hueBase>360)this.hueBase-=360;}
+  update(dt,ts){this.hueBase+=(dt*5*(this.m.spd||1)+(ts?ts.hueShift*.002+ts.secondWave*.3:0));if(this.hueBase>360)this.hueBase-=360;}
   hsl(off=0,alpha=1){
     const{hMin,hMax,sLo,sHi,lLo,lHi}=this.m;
     const s=((sLo+sHi)/2*100)|0,l=((lLo+lHi)/2*100)|0;
@@ -155,7 +168,14 @@ class MicrophoneSystem{
     this.treble=lerp(tr/(n*.5),   this.treble,S);
     this.volume=lerp(v/n,         this.volume,S);
   }
-  fallback(t){this.bass=.3+.2*Math.sin(t*.7);this.mid=.25+.15*Math.sin(t*1.1+1);this.treble=.15+.1*Math.sin(t*1.9+2);this.volume=.25+.15*Math.sin(t*.5);}
+  fallback(t){
+    // Richer synthetic audio: multiple overlapping waves + occasional bass "hits"
+    const hit=Math.max(0,Math.sin(t*1.3)-.7)*3;// periodic bass spike
+    this.bass=.3+.2*Math.sin(t*.7)+.1*Math.sin(t*.23+3)+hit*.15;
+    this.mid=.25+.15*Math.sin(t*1.1+1)+.08*Math.sin(t*.37+2);
+    this.treble=.15+.1*Math.sin(t*1.9+2)+.06*Math.sin(t*2.7);
+    this.volume=.25+.15*Math.sin(t*.5)+hit*.1;
+  }
 }
 
 // ═══════════════════════════════════════════
@@ -366,8 +386,9 @@ class FourierMandala{
 // ═══════════════════════════════════════════
 class GeometryEngine{
   constructor(){this.pats=['flowerOfLife','metatronsCube','sriYantra','mandala'];this.cur=0;this.nxt=1;this.tp=1;this.tt=0;this.td=35+Math.random()*25;this.rot=0;this.ps=1;this.pv=0;this.cx=0;this.cy=0;}
-  update(dt,breath,W,H,mouseDown,mx,my){
-    this.rot+=dt*.15*(breath.value*.3+.85);this.tt+=dt;
+  update(dt,breath,W,H,mouseDown,mx,my,timeSys){
+    const tsDrift=timeSys?Math.sin(timeSys.minutePhase)*.05:0;
+    this.rot+=dt*(.15+tsDrift)*(breath.value*.3+.85);this.tt+=dt;
     this.pv*=.92;this.ps+=this.pv*dt;this.ps+=(1-this.ps)*dt*3;
     this.cx=lerp(this.cx||W/2,mouseDown?lerp(W/2,mx,.3):W/2,dt*2);
     this.cy=lerp(this.cy||H/2,mouseDown?lerp(H/2,my,.3):H/2,dt*2);
@@ -434,6 +455,110 @@ class SpiritLights{
     for(const l of this.lights){const a=clamp(l.life/l.maxLife,0,1)*.6,gr=l.size*4,g=ctx.createRadialGradient(l.x,l.y,0,l.x,l.y,gr);g.addColorStop(0,`hsla(${l.hue|0},70%,80%,${(a*.9).toFixed(2)})`);g.addColorStop(.3,`hsla(${l.hue|0},70%,65%,${(a*.5).toFixed(2)})`);g.addColorStop(1,`hsla(${l.hue|0},70%,50%,0)`);ctx.fillStyle=g;ctx.beginPath();ctx.arc(l.x,l.y,gr,0,TAU);ctx.fill();}
     ctx.restore();
   }
+}
+
+// ═══════════════════════════════════════════
+// TUNNEL EFFECT  (zoom-in wormhole)
+// ═══════════════════════════════════════════
+class TunnelEffect{
+  constructor(){
+    this.rings=[];this.active=false;this.intensity=0;this.targetIntensity=0;
+    this.eventTimer=0;this.eventInterval=25+Math.random()*20;// first trigger 25-45s in
+    this.eventDuration=0;this.maxDuration=8;
+    this.rotation=0;this.shapePhase=0;// morphs between circle/hex/star
+    this.holdBoost=0;// extra speed from mouse hold
+  }
+  trigger(duration){
+    if(this.active&&this.intensity>.5)return;// don't re-trigger mid-tunnel
+    this.active=true;this.targetIntensity=1;this.eventDuration=duration||6+Math.random()*6;
+  }
+  stop(){this.targetIntensity=0;}
+  update(dt,audio,breath,timeSys){
+    // Auto-trigger at random intervals
+    if(!this.active){
+      this.eventTimer+=dt;
+      if(this.eventTimer>=this.eventInterval){
+        this.trigger();
+        this.eventTimer=0;
+        this.eventInterval=20+Math.random()*25+timeSys.chaos*15;// chaos → more frequent
+      }
+    }
+    // Intensity ramp
+    if(this.active){
+      this.intensity=lerp(this.intensity,this.targetIntensity,dt*1.5);
+      this.eventDuration-=dt;
+      if(this.eventDuration<=0){this.stop();this.eventDuration=0;}
+      if(this.targetIntensity===0&&this.intensity<.02){this.active=false;this.intensity=0;}
+    }
+    this.holdBoost*=.9;
+    // Spawn rings based on intensity
+    const spawnRate=6+audio.bass*8+this.holdBoost*10;// rings per second
+    const spawnCount=Math.max(0,Math.floor(this.intensity*spawnRate*dt+Math.random()*.5));
+    for(let i=0;i<spawnCount;i++){
+      this.rings.push({
+        r:2+Math.random()*8, // start small at center
+        speed:80+Math.random()*120+audio.bass*100+this.holdBoost*80,
+        hueOff:Math.random()*40-20,
+        alpha:.6+Math.random()*.3,
+        sides:Math.random()<.3?6:Math.random()<.15?5:0, // 0=circle, 5=star, 6=hex
+        rot:Math.random()*TAU,
+        width:1+Math.random()*1.5+audio.treble*2
+      });
+    }
+    // Update rings — expand outward
+    const speedMul=1+breath.value*.3+timeSys.secondWave*.2;
+    for(let i=this.rings.length-1;i>=0;i--){
+      const ring=this.rings[i];
+      ring.r+=ring.speed*speedMul*dt;
+      ring.alpha-=dt*.15;// fade as they expand
+      ring.rot+=dt*.1*(ring.sides===5?-1:1);
+      if(ring.alpha<=0||ring.r>2000)this.rings.splice(i,1);
+    }
+    // Global rotation
+    this.rotation+=dt*.08*(1+audio.mid*.5);
+    this.shapePhase+=dt*.15;
+    // Cap ring count for performance
+    if(this.rings.length>120)this.rings.splice(0,this.rings.length-120);
+  }
+  draw(ctx,W,H,colors,audio){
+    if(!this.active&&this.rings.length===0)return;
+    const cx=W/2,cy=H/2,maxR=Math.sqrt(W*W+H*H)/2;
+    ctx.save();ctx.globalCompositeOperation='screen';
+    ctx.translate(cx,cy);ctx.rotate(this.rotation);
+    for(const ring of this.rings){
+      const normR=ring.r/maxR;
+      const a=ring.alpha*this.intensity*(1-normR*.5);
+      if(a<.01)continue;
+      const hue=colors.hslValues(ring.hueOff).h;
+      ctx.strokeStyle=`hsla(${hue|0},70%,65%,${a.toFixed(3)})`;
+      ctx.lineWidth=ring.width*(1+normR*.5);
+      ctx.beginPath();
+      if(ring.sides===0){
+        // Circle
+        ctx.arc(0,0,Math.max(1,ring.r),0,TAU);
+      }else{
+        // Polygon (hex or pentagram/star)
+        const n=ring.sides,isStar=n===5;
+        for(let j=0;j<=n;j++){
+          const angle=ring.rot+j/n*TAU;
+          const rr=isStar?(j%2===0?ring.r:ring.r*.45):ring.r;
+          const px=Math.cos(angle)*Math.max(1,rr),py=Math.sin(angle)*Math.max(1,rr);
+          j===0?ctx.moveTo(px,py):ctx.lineTo(px,py);
+        }
+        ctx.closePath();
+      }
+      ctx.stroke();
+      // Inner glow on fresh rings
+      if(ring.r<60&&a>.2){
+        const g=ctx.createRadialGradient(0,0,Math.max(1,ring.r*.5),0,0,Math.max(2,ring.r*1.2));
+        g.addColorStop(0,`hsla(${hue|0},80%,75%,${(a*.3).toFixed(3)})`);
+        g.addColorStop(1,'hsla(0,0%,0%,0)');
+        ctx.fillStyle=g;ctx.beginPath();ctx.arc(0,0,Math.max(2,ring.r*1.2),0,TAU);ctx.fill();
+      }
+    }
+    ctx.restore();
+  }
+  boostFromHold(){this.holdBoost=1;}
 }
 
 // ═══════════════════════════════════════════
@@ -575,7 +700,7 @@ class App{
     // Mode & Phase
     this.modeName='mystic';this.phase=0;this.phaseTimer=0;this.nextPhaseT=PHASE_CONFIG[1].t;
     // Layer toggles — start from Phase 0 defaults
-    this.layers={rd:false,attractor:false,geometry:true,lissajous:false,fourier:false,particles:true};
+    this.layers={rd:false,attractor:false,geometry:true,lissajous:false,fourier:false,particles:true,tunnel:false};
     // User overrides (once user manually toggles, auto-phase won't override that layer)
     this.userOverrides=new Set();
     // Systems
@@ -585,7 +710,7 @@ class App{
     this.trail=new TrailSystem(100);this.rd=new ReactionDiffusion();
     this.attractor=new StrangeAttractor();this.lissajous=new LissajousSystem();
     this.fourier=new FourierMandala();this.geometry=new GeometryEngine();
-    this.spirits=new SpiritLights();this.sound=new SoundEngine();
+    this.tunnel=new TunnelEffect();this.spirits=new SpiritLights();this.sound=new SoundEngine();
     this.onboarding=new OnboardingSystem();
     this.ambientSpawned=false;this.micEnabled=false;
     this._setupHud();this._setupEvents();this.resize();
@@ -724,9 +849,10 @@ class App{
       this.colors.update(dt,this.timeSys);
       this.trail.update(dt);this.particles.update(dt,this.mx,this.my);
       this.ripples.update(dt);
-      this.geometry.update(dt,this.breath,this.W,this.H,this.down,this.mx,this.my);
+      this.geometry.update(dt,this.breath,this.W,this.H,this.down,this.mx,this.my,this.timeSys);
       this.attractor.update(dt);this.lissajous.update(dt,audio);
       this.fourier.update(dt);this.rd.update(audio.bass);
+      if(this.layers.tunnel)this.tunnel.update(dt,audio,this.breath,this.timeSys);
       this.spirits.update(dt);this.sound.updateDrone(this.time);
 
       if(this.vel>.5){
@@ -736,7 +862,9 @@ class App{
         this.sound.updateMove(this.mx/this.W,this.my/this.H,this.vel);
       }else{this.sound.fadeMove();}
 
-      if(this.down){this.holdDur+=dt;this.sound.updateHold(this.holdDur);if(this.holdDur>.2){for(let i=0;i<8;i++){const a=this.time*5+i*TAU/8,s=2+Math.random()*2,h=this.colors.hslValues(this.holdDur*30).h;this.particles.spawn(this.mx,this.my,Math.cos(a)*s,Math.sin(a)*s,.6+Math.random()*.6,1.5+Math.random(),h,3);}}}
+      if(this.down){this.holdDur+=dt;this.sound.updateHold(this.holdDur);if(this.holdDur>.2){for(let i=0;i<8;i++){const a=this.time*5+i*TAU/8,s=2+Math.random()*2,h=this.colors.hslValues(this.holdDur*30).h;this.particles.spawn(this.mx,this.my,Math.cos(a)*s,Math.sin(a)*s,.6+Math.random()*.6,1.5+Math.random(),h,3);}if(this.holdDur>.5&&this.layers.tunnel){this.tunnel.boostFromHold();if(!this.tunnel.active)this.tunnel.trigger(3+this.holdDur);}}}
+      // Audio-reactive ambient particle bursts (bass spikes spawn extra particles)
+      if(audio.bass>.55&&Math.random()<audio.bass*dt*8){const h=this.colors.hslValues(audio.bass*80).h;for(let i=0;i<3;i++)this.particles.spawn(Math.random()*this.W,Math.random()*this.H,(Math.random()-.5)*2,(Math.random()-.5)*2,2+Math.random()*2,1.5+Math.random()*2,h+Math.random()*30,1);}
       if(this.idleTime>10&&Math.random()<dt*.3)this.spirits.spawn(this.W,this.H,this.colors.hslValues(Math.random()*60).h);
       if(this.flashA>0)this.flashA*=.88;this.vel*=.85;
       this._renderMain(audio);
@@ -759,11 +887,12 @@ class App{
     // Phase 3 "Dissolution" — extra alpha overlay for depth
     const dissolveMix=this.phase>=3?.15:0;
 
-    // Layer 0: Background
-    const grad=ctx.createRadialGradient(W/2,H/2,0,W/2,H/2,Math.max(W,H)*(.6+bg*.15));
-    grad.addColorStop(0,`hsla(${bgH|0},40%,${m.bgL+bg*4}%,1)`);
-    grad.addColorStop(.5,`hsla(${(bgH+20)|0},30%,${m.bgL*.6+bg*2}%,1)`);
-    grad.addColorStop(1,`hsla(${(bgH+40)|0},20%,2%,1)`);
+    // Layer 0: Background (audio-reactive — bass pulses the glow, volume brightens)
+    const audioPulse=audio.bass*.4+audio.volume*.15;
+    const grad=ctx.createRadialGradient(W/2,H/2,0,W/2,H/2,Math.max(W,H)*(.6+bg*.15+audioPulse*.1));
+    grad.addColorStop(0,`hsla(${bgH|0},${40+audio.bass*20|0}%,${m.bgL+bg*4+audioPulse*6}%,1)`);
+    grad.addColorStop(.5,`hsla(${(bgH+20)|0},30%,${m.bgL*.6+bg*2+audioPulse*3}%,1)`);
+    grad.addColorStop(1,`hsla(${(bgH+40)|0},20%,${2+audioPulse*2}%,1)`);
     ctx.fillStyle=grad;ctx.fillRect(0,0,W,H);
 
     // Dissolution phase: subtle second layer for extra depth
@@ -777,14 +906,17 @@ class App{
     // Layer 2: Strange Attractor
     if(this.layers.attractor)this.attractor.draw(ctx,W,H,this.colors,audio);
 
-    // Layer 3: Sacred Geometry
-    if(this.layers.geometry)this.geometry.draw(ctx,W,H,this.colors,this.breath);
+    // Layer 3: Sacred Geometry (audio-reactive scale)
+    if(this.layers.geometry){ctx.save();const aScale=1+audio.bass*.08+audio.volume*.04;ctx.translate(W/2,H/2);ctx.scale(aScale,aScale);ctx.translate(-W/2,-H/2);this.geometry.draw(ctx,W,H,this.colors,this.breath);ctx.restore();}
 
     // Layer 4: Lissajous
     if(this.layers.lissajous)this.lissajous.draw(ctx,W/2,H/2,Math.min(W,H)*.22*this.breath.scale,this.colors,audio);
 
     // Layer 5: Fourier Mandala
     if(this.layers.fourier)this.fourier.draw(ctx,W/2,H/2,Math.min(W,H)*.28,this.colors,audio);
+
+    // Layer 5.5: Tunnel zoom-in
+    if(this.layers.tunnel)this.tunnel.draw(ctx,W,H,this.colors,audio);
 
     // Layer 6: Trail
     this.trail.draw(ctx,this.colors);
