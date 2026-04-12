@@ -1,0 +1,1300 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>∞ Consciousness Explorer ∞</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { width: 100%; height: 100%; overflow: hidden; background: #000; }
+  canvas { display: block; width: 100vw; height: 100vh; }
+  #entry {
+    position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+    display: flex; align-items: center; justify-content: center; flex-direction: column;
+    background: radial-gradient(ellipse at center, #0a0015 0%, #000 100%);
+    z-index: 10; cursor: pointer; transition: opacity 1.5s ease;
+  }
+  #entry.hidden { opacity: 0; pointer-events: none; }
+  #entry h1 {
+    font-family: Georgia, 'Times New Roman', serif;
+    color: #a080d0; font-size: clamp(1.5rem, 4vw, 3rem);
+    letter-spacing: 0.3em; text-transform: uppercase;
+    animation: breatheText 5s ease-in-out infinite;
+  }
+  #entry p {
+    font-family: Georgia, serif; color: #6040a0; font-size: clamp(0.8rem, 2vw, 1.2rem);
+    margin-top: 2rem; letter-spacing: 0.15em;
+    animation: breatheText 5s ease-in-out infinite 0.5s;
+  }
+  @keyframes breatheText {
+    0%, 100% { opacity: 0.4; transform: scale(1); }
+    50% { opacity: 1; transform: scale(1.03); }
+  }
+</style>
+</head>
+<body>
+<div id="entry">
+  <h1>Consciousness Explorer</h1>
+  <p>Click anywhere to enter</p>
+</div>
+<canvas id="c"></canvas>
+<script>
+'use strict';
+
+// ============================================================
+// CONSTANTS
+// ============================================================
+const TAU = Math.PI * 2;
+const TRAIL_LENGTH = 100;
+const MAX_PARTICLES = 2000;
+const MAX_RIPPLES = 20;
+const MAX_EXPLOSIONS = 800;
+const AMBIENT_COUNT = 300;
+const BREATH_PERIOD = 5.0; // seconds
+const PENTATONIC = [0, 2, 4, 7, 9]; // C major pentatonic semitones
+
+// ============================================================
+// BREATHING SYSTEM
+// ============================================================
+class BreathingSystem {
+  constructor() { this.phase = 0; }
+  update(dt) { this.phase += dt / BREATH_PERIOD * TAU; }
+  get value() { return 0.5 + 0.5 * Math.sin(this.phase); } // 0..1
+  get scale() { return 0.95 + 0.1 * this.value; }
+}
+
+// ============================================================
+// COLOR SYSTEM
+// ============================================================
+const COLOR_MODES = [
+  { name: 'rainbow',   hueMin: 0,   hueMax: 360, sat: [0.7, 1.0], lit: [0.45, 0.65] },
+  { name: 'aurora',    hueMin: 120, hueMax: 300, sat: [0.7, 0.95], lit: [0.4, 0.6] },
+  { name: 'sunset',    hueMin: -30, hueMax: 60,  sat: [0.8, 1.0], lit: [0.5, 0.7] },
+  { name: 'ocean',     hueMin: 180, hueMax: 240, sat: [0.6, 0.9], lit: [0.3, 0.55] },
+  { name: 'ethereal',  hueMin: 0,   hueMax: 360, sat: [0.08, 0.2], lit: [0.7, 0.9] },
+];
+
+class ColorSystem {
+  constructor() {
+    this.hueBase = Math.random() * 360;
+    this.modeIndex = 0;
+    this.modeTimer = 0;
+    this.modeDuration = 50 + Math.random() * 40;
+    this.transitionProgress = 1;
+    this.prevMode = COLOR_MODES[0];
+  }
+  get mode() { return COLOR_MODES[this.modeIndex]; }
+
+  update(dt) {
+    this.hueBase += dt * 6; // ~6 deg/sec
+    if (this.hueBase > 360) this.hueBase -= 360;
+    this.modeTimer += dt;
+    if (this.transitionProgress < 1) {
+      this.transitionProgress = Math.min(1, this.transitionProgress + dt * 0.3);
+    }
+    if (this.modeTimer > this.modeDuration) {
+      this.modeTimer = 0;
+      this.modeDuration = 45 + Math.random() * 45;
+      this.prevMode = this.mode;
+      this.modeIndex = (this.modeIndex + 1) % COLOR_MODES.length;
+      this.transitionProgress = 0;
+    }
+  }
+
+  hsl(hueOffset = 0, alpha = 1) {
+    const m = this.mode;
+    const t = this.transitionProgress;
+    const pm = this.prevMode;
+    const hMin = lerp(pm.hueMin, m.hueMin, t);
+    const hMax = lerp(pm.hueMax, m.hueMax, t);
+    const sat = lerp(lerp(pm.sat[0], m.sat[0], t), lerp(pm.sat[1], m.sat[1], t), 0.5) * 100;
+    const lit = lerp(lerp(pm.lit[0], m.lit[0], t), lerp(pm.lit[1], m.lit[1], t), 0.5) * 100;
+    let h = this.hueBase + hueOffset;
+    // Clamp hue to mode range
+    const range = hMax - hMin;
+    if (range < 360) {
+      h = hMin + ((h % range) + range) % range;
+    }
+    h = ((h % 360) + 360) % 360;
+    return `hsla(${h|0}, ${sat|0}%, ${lit|0}%, ${alpha})`;
+  }
+
+  hslValues(hueOffset = 0) {
+    const m = this.mode;
+    const t = this.transitionProgress;
+    const pm = this.prevMode;
+    const hMin = lerp(pm.hueMin, m.hueMin, t);
+    const hMax = lerp(pm.hueMax, m.hueMax, t);
+    const sat = lerp(lerp(pm.sat[0], m.sat[0], t), lerp(pm.sat[1], m.sat[1], t), 0.5);
+    const lit = lerp(lerp(pm.lit[0], m.lit[0], t), lerp(pm.lit[1], m.lit[1], t), 0.5);
+    let h = this.hueBase + hueOffset;
+    const range = hMax - hMin;
+    if (range < 360) h = hMin + ((h % range) + range) % range;
+    h = ((h % 360) + 360) % 360;
+    return { h, s: sat, l: lit };
+  }
+}
+
+// ============================================================
+// PARTICLE SYSTEM (object pool with typed arrays)
+// ============================================================
+class ParticlePool {
+  constructor(max) {
+    this.max = max;
+    this.count = 0;
+    this.x = new Float32Array(max);
+    this.y = new Float32Array(max);
+    this.vx = new Float32Array(max);
+    this.vy = new Float32Array(max);
+    this.life = new Float32Array(max);
+    this.maxLife = new Float32Array(max);
+    this.size = new Float32Array(max);
+    this.hue = new Float32Array(max);
+    this.type = new Uint8Array(max); // 0=ambient, 1=trail, 2=explosion, 3=vortex, 4=spirit
+  }
+
+  spawn(x, y, vx, vy, life, size, hue, type) {
+    let i;
+    if (this.count < this.max) {
+      i = this.count++;
+    } else {
+      // Find oldest particle
+      let minLife = Infinity, minIdx = 0;
+      for (let j = 0; j < this.max; j++) {
+        if (this.life[j] < minLife) { minLife = this.life[j]; minIdx = j; }
+      }
+      i = minIdx;
+    }
+    this.x[i] = x; this.y[i] = y;
+    this.vx[i] = vx; this.vy[i] = vy;
+    this.life[i] = life; this.maxLife[i] = life;
+    this.size[i] = size; this.hue[i] = hue;
+    this.type[i] = type;
+    return i;
+  }
+
+  update(dt, mouseX, mouseY, breath) {
+    for (let i = this.count - 1; i >= 0; i--) {
+      this.life[i] -= dt;
+      if (this.life[i] <= 0) {
+        // Swap with last
+        this.count--;
+        if (i < this.count) {
+          this.x[i] = this.x[this.count];
+          this.y[i] = this.y[this.count];
+          this.vx[i] = this.vx[this.count];
+          this.vy[i] = this.vy[this.count];
+          this.life[i] = this.life[this.count];
+          this.maxLife[i] = this.maxLife[this.count];
+          this.size[i] = this.size[this.count];
+          this.hue[i] = this.hue[this.count];
+          this.type[i] = this.type[this.count];
+        }
+        continue;
+      }
+
+      const type = this.type[i];
+      const friction = type === 0 ? 0.999 : type === 4 ? 0.998 : 0.97;
+
+      // Cursor attraction for ambient and spirit particles
+      if (type === 0 || type === 4) {
+        const dx = mouseX - this.x[i];
+        const dy = mouseY - this.y[i];
+        const distSq = dx * dx + dy * dy + 1;
+        const force = Math.min(50 / distSq, 0.5);
+        this.vx[i] += dx * force * dt * 60;
+        this.vy[i] += dy * force * dt * 60;
+      }
+
+      this.vx[i] *= friction;
+      this.vy[i] *= friction;
+      this.x[i] += this.vx[i] * dt * 60;
+      this.y[i] += this.vy[i] * dt * 60;
+    }
+  }
+
+  draw(ctx, colors) {
+    ctx.save();
+    ctx.globalCompositeOperation = 'screen';
+    for (let i = 0; i < this.count; i++) {
+      const alpha = Math.min(1, this.life[i] / this.maxLife[i] * 2);
+      if (alpha < 0.01) continue;
+      const s = this.size[i] * (0.5 + 0.5 * (this.life[i] / this.maxLife[i]));
+      const h = this.hue[i];
+      const glowR = s * 3;
+      const x = this.x[i], y = this.y[i];
+      // Soft glow via radial gradient (much faster than shadowBlur)
+      const grad = ctx.createRadialGradient(x, y, 0, x, y, glowR);
+      grad.addColorStop(0, `hsla(${h|0}, 85%, 70%, ${(alpha * 0.9).toFixed(2)})`);
+      grad.addColorStop(0.4, `hsla(${h|0}, 80%, 60%, ${(alpha * 0.4).toFixed(2)})`);
+      grad.addColorStop(1, `hsla(${h|0}, 80%, 50%, 0)`);
+      ctx.fillStyle = grad;
+      ctx.beginPath();
+      ctx.arc(x, y, glowR, 0, TAU);
+      ctx.fill();
+    }
+    ctx.restore();
+  }
+}
+
+// ============================================================
+// RIPPLE SYSTEM
+// ============================================================
+class RippleSystem {
+  constructor(max) {
+    this.max = max;
+    this.ripples = [];
+  }
+  spawn(x, y, hue) {
+    if (this.ripples.length >= this.max) this.ripples.shift();
+    this.ripples.push({ x, y, radius: 0, alpha: 0.6, hue, maxRadius: 150 + Math.random() * 100 });
+  }
+  update(dt) {
+    for (let i = this.ripples.length - 1; i >= 0; i--) {
+      const r = this.ripples[i];
+      r.radius += dt * 120;
+      r.alpha = 0.6 * (1 - r.radius / r.maxRadius);
+      if (r.alpha <= 0.01) { this.ripples.splice(i, 1); }
+    }
+  }
+  draw(ctx) {
+    ctx.save();
+    ctx.globalCompositeOperation = 'screen';
+    for (const r of this.ripples) {
+      const lw = Math.max(1, 3 * (1 - r.radius / r.maxRadius));
+      ctx.strokeStyle = `hsla(${r.hue|0}, 80%, 65%, ${r.alpha.toFixed(2)})`;
+      ctx.lineWidth = lw;
+      ctx.beginPath();
+      ctx.arc(r.x, r.y, r.radius, 0, TAU);
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+}
+
+// ============================================================
+// TRAIL SYSTEM (ring buffer)
+// ============================================================
+class TrailSystem {
+  constructor(length) {
+    this.length = length;
+    this.points = new Array(length);
+    for (let i = 0; i < length; i++) this.points[i] = { x: 0, y: 0, age: 999 };
+    this.head = 0;
+    this.active = false;
+  }
+  push(x, y) {
+    this.points[this.head] = { x, y, age: 0 };
+    this.head = (this.head + 1) % this.length;
+    this.active = true;
+  }
+  update(dt) {
+    for (let i = 0; i < this.length; i++) this.points[i].age += dt;
+  }
+  draw(ctx, colors, breath) {
+    if (!this.active) return;
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    // Draw from oldest to newest
+    const pts = [];
+    for (let i = 0; i < this.length; i++) {
+      const idx = (this.head + i) % this.length;
+      const p = this.points[idx];
+      if (p.age < 2.0) pts.push(p);
+    }
+    if (pts.length < 3) { ctx.restore(); return; }
+
+    for (let i = 1; i < pts.length - 1; i++) {
+      const p = pts[i];
+      const t = 1 - p.age / 2.0;
+      if (t <= 0) continue;
+      const alpha = t * t * 0.8;
+      const width = t * 4 + 1;
+      const hueShift = (1 - t) * 60;
+      const c = colors.hsl(hueShift, alpha);
+
+      ctx.strokeStyle = c;
+      ctx.lineWidth = width + 1;
+      ctx.lineCap = 'round';
+
+      const prev = pts[i - 1];
+      const next = pts[i + 1];
+      const mx = (p.x + next.x) / 2;
+      const my = (p.y + next.y) / 2;
+
+      ctx.beginPath();
+      ctx.moveTo((prev.x + p.x) / 2, (prev.y + p.y) / 2);
+      ctx.quadraticCurveTo(p.x, p.y, mx, my);
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+}
+
+// ============================================================
+// SACRED GEOMETRY ENGINE
+// ============================================================
+class GeometryEngine {
+  constructor() {
+    this.patterns = ['flowerOfLife', 'metatronsCube', 'sriYantra', 'mandala'];
+    this.currentIndex = 0;
+    this.nextIndex = 1;
+    this.transitionProgress = 1; // 1 = fully on current
+    this.transitionTimer = 0;
+    this.transitionDuration = 35 + Math.random() * 25;
+    this.rotation = 0;
+    this.pulseScale = 1;
+    this.pulseVel = 0;
+    this.centerX = 0;
+    this.centerY = 0;
+    this.targetCenterX = 0;
+    this.targetCenterY = 0;
+    // Offscreen canvas for caching
+    this.offCanvas = document.createElement('canvas');
+    this.offCtx = this.offCanvas.getContext('2d');
+    this.lastDrawnRotation = -999;
+    this.needsRedraw = true;
+  }
+
+  update(dt, breath, screenW, screenH, mouseDown, mouseX, mouseY) {
+    this.rotation += dt * 0.15;
+    this.transitionTimer += dt;
+
+    // Pulse decay
+    this.pulseVel *= 0.92;
+    this.pulseScale += this.pulseVel * dt;
+    this.pulseScale += (1 - this.pulseScale) * dt * 3;
+
+    // Center drift toward mouse when held
+    this.targetCenterX = screenW / 2;
+    this.targetCenterY = screenH / 2;
+    if (mouseDown) {
+      this.targetCenterX = lerp(screenW / 2, mouseX, 0.3);
+      this.targetCenterY = lerp(screenH / 2, mouseY, 0.3);
+    }
+    this.centerX = lerp(this.centerX || screenW / 2, this.targetCenterX, dt * 2);
+    this.centerY = lerp(this.centerY || screenH / 2, this.targetCenterY, dt * 2);
+
+    // Transition between patterns
+    if (this.transitionTimer > this.transitionDuration && this.transitionProgress >= 1) {
+      this.transitionTimer = 0;
+      this.transitionDuration = 30 + Math.random() * 30;
+      this.nextIndex = (this.currentIndex + 1) % this.patterns.length;
+      this.transitionProgress = 0;
+    }
+    if (this.transitionProgress < 1) {
+      this.transitionProgress += dt * 0.25;
+      if (this.transitionProgress >= 1) {
+        this.transitionProgress = 1;
+        this.currentIndex = this.nextIndex;
+      }
+    }
+
+    // Check if we need to redraw offscreen
+    const rotDelta = Math.abs(this.rotation - this.lastDrawnRotation);
+    if (rotDelta > 0.005 || this.needsRedraw) {
+      this.needsRedraw = true;
+    }
+  }
+
+  pulse() {
+    this.pulseVel = 3;
+  }
+
+  draw(ctx, W, H, colors, breath) {
+    const size = Math.min(W, H) * 0.3 * breath.scale * this.pulseScale;
+
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    ctx.translate(this.centerX, this.centerY);
+    ctx.rotate(this.rotation);
+
+    // Draw current pattern
+    if (this.transitionProgress < 1) {
+      // Cross-fade
+      ctx.globalAlpha = 1 - this.transitionProgress * 0.5;
+      this.drawPattern(ctx, this.patterns[this.currentIndex], size, colors, breath);
+      ctx.globalAlpha = this.transitionProgress;
+      this.drawPattern(ctx, this.patterns[this.nextIndex], size, colors, breath);
+    } else {
+      ctx.globalAlpha = 0.85;
+      this.drawPattern(ctx, this.patterns[this.currentIndex], size, colors, breath);
+    }
+
+    ctx.restore();
+  }
+
+  drawPattern(ctx, name, size, colors, breath) {
+    switch (name) {
+      case 'flowerOfLife': this.drawFlowerOfLife(ctx, size, colors, breath); break;
+      case 'metatronsCube': this.drawMetatronsCube(ctx, size, colors, breath); break;
+      case 'sriYantra': this.drawSriYantra(ctx, size, colors, breath); break;
+      case 'mandala': this.drawMandala(ctx, size, colors, breath); break;
+    }
+  }
+
+  drawFlowerOfLife(ctx, size, colors, breath) {
+    const r = size * 0.25;
+    const centers = [{ x: 0, y: 0 }];
+    // Inner ring
+    for (let i = 0; i < 6; i++) {
+      const a = i * TAU / 6;
+      centers.push({ x: Math.cos(a) * r, y: Math.sin(a) * r });
+    }
+    // Outer ring
+    for (let i = 0; i < 6; i++) {
+      const a = i * TAU / 6;
+      centers.push({ x: Math.cos(a) * r * 2, y: Math.sin(a) * r * 2 });
+      const a2 = (i + 0.5) * TAU / 6;
+      centers.push({ x: Math.cos(a2) * r * 1.732, y: Math.sin(a2) * r * 1.732 });
+    }
+
+    ctx.lineWidth = 1.8;
+    for (let i = 0; i < centers.length; i++) {
+      const c = centers[i];
+      const phaseOffset = i * 0.2;
+      const breathR = r * (1 + 0.03 * Math.sin(breath.phase + phaseOffset));
+      const hue = (i / centers.length) * 60;
+      ctx.strokeStyle = colors.hsl(hue, 0.6);
+      ctx.beginPath();
+      ctx.arc(c.x, c.y, breathR, 0, TAU);
+      ctx.stroke();
+    }
+  }
+
+  drawMetatronsCube(ctx, size, colors, breath) {
+    const r1 = size * 0.3;
+    const r2 = size * 0.55;
+    const nodes = [{ x: 0, y: 0 }];
+    for (let i = 0; i < 6; i++) {
+      const a = i * TAU / 6 + breath.phase * 0.05;
+      nodes.push({ x: Math.cos(a) * r1, y: Math.sin(a) * r1 });
+    }
+    for (let i = 0; i < 6; i++) {
+      const a = (i + 0.5) * TAU / 6 + breath.phase * 0.03;
+      nodes.push({ x: Math.cos(a) * r2, y: Math.sin(a) * r2 });
+    }
+
+    // Draw lines
+    ctx.lineWidth = 0.8;
+    for (let i = 0; i < nodes.length; i++) {
+      for (let j = i + 1; j < nodes.length; j++) {
+        const dx = nodes[j].x - nodes[i].x;
+        const dy = nodes[j].y - nodes[i].y;
+        const angle = Math.atan2(dy, dx);
+        const hue = (angle / TAU) * 360;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        const alpha = 0.2 + 0.25 * Math.sin(breath.phase + dist * 0.01);
+        ctx.strokeStyle = colors.hsl(hue, Math.max(0, alpha));
+        ctx.beginPath();
+        ctx.moveTo(nodes[i].x, nodes[i].y);
+        ctx.lineTo(nodes[j].x, nodes[j].y);
+        ctx.stroke();
+      }
+    }
+
+    // Draw nodes
+    for (let i = 0; i < nodes.length; i++) {
+      const hue = (i / nodes.length) * 120;
+      ctx.fillStyle = colors.hsl(hue, 0.8);
+      ctx.beginPath();
+      ctx.arc(nodes[i].x, nodes[i].y, 4, 0, TAU);
+      ctx.fill();
+    }
+  }
+
+  drawSriYantra(ctx, size, colors, breath) {
+    const s = size * 0.5;
+    // 9 interlocking triangles: 4 up, 5 down
+    const upTriangles = [
+      [[-0.8, 0.5], [0.8, 0.5], [0, -0.7]],
+      [[-0.65, 0.35], [0.65, 0.35], [0, -0.55]],
+      [[-0.5, 0.2], [0.5, 0.2], [0, -0.4]],
+      [[-0.3, 0.08], [0.3, 0.08], [0, -0.22]],
+    ];
+    const downTriangles = [
+      [[-0.75, -0.45], [0.75, -0.45], [0, 0.65]],
+      [[-0.6, -0.32], [0.6, -0.32], [0, 0.52]],
+      [[-0.48, -0.22], [0.48, -0.22], [0, 0.38]],
+      [[-0.35, -0.12], [0.35, -0.12], [0, 0.25]],
+      [[-0.2, -0.04], [0.2, -0.04], [0, 0.13]],
+    ];
+
+    const drawTriGroup = (tris, hueStart) => {
+      tris.forEach((tri, idx) => {
+        const phase = breath.phase + idx * 0.5;
+        const breathOffset = 0.01 * Math.sin(phase);
+        const hue = hueStart + idx * 25;
+        const alpha = 0.4 + 0.15 * Math.sin(phase);
+        ctx.strokeStyle = colors.hsl(hue, alpha);
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.moveTo(tri[0][0] * s * (1 + breathOffset), tri[0][1] * s * (1 + breathOffset));
+        ctx.lineTo(tri[1][0] * s * (1 + breathOffset), tri[1][1] * s * (1 + breathOffset));
+        ctx.lineTo(tri[2][0] * s * (1 + breathOffset), tri[2][1] * s * (1 + breathOffset));
+        ctx.closePath();
+        ctx.stroke();
+      });
+    };
+
+    drawTriGroup(upTriangles, 0);
+    drawTriGroup(downTriangles, 180);
+
+    // Outer circles
+    for (let i = 0; i < 3; i++) {
+      const r = s * (0.85 + i * 0.06);
+      const alpha = 0.3 + 0.15 * Math.sin(breath.phase + i);
+      ctx.strokeStyle = colors.hsl(i * 40, alpha);
+      ctx.lineWidth = 1.2;
+      ctx.beginPath();
+      ctx.arc(0, 0, r, 0, TAU);
+      ctx.stroke();
+    }
+  }
+
+  drawMandala(ctx, size, colors, breath) {
+    const symmetry = 12;
+    const layers = 5;
+
+    for (let layer = 0; layer < layers; layer++) {
+      const r = size * (0.15 + layer * 0.15);
+      const alpha = 0.3 + 0.15 * Math.sin(breath.phase + layer * 0.8);
+      const dir = layer % 2 === 0 ? 1 : -1;
+      const rotOffset = breath.phase * 0.1 * dir;
+
+      for (let i = 0; i < symmetry; i++) {
+        const a = (i / symmetry) * TAU + rotOffset;
+        const hue = (i / symmetry) * 60 + layer * 30;
+        ctx.strokeStyle = colors.hsl(hue, alpha);
+        ctx.fillStyle = colors.hsl(hue, alpha * 0.3);
+        ctx.lineWidth = 1.2;
+
+        // Petal shape
+        const petalR = r * 0.35 * (1 + 0.1 * Math.sin(breath.phase + i * 0.5));
+        ctx.save();
+        ctx.rotate(a);
+        ctx.beginPath();
+        ctx.ellipse(r, 0, petalR, petalR * 0.4, 0, 0, TAU);
+        ctx.stroke();
+        ctx.fill();
+        ctx.restore();
+      }
+
+      // Ring
+      ctx.strokeStyle = colors.hsl(layer * 50, alpha * 0.5);
+      ctx.lineWidth = 0.8;
+      ctx.beginPath();
+      ctx.arc(0, 0, r, 0, TAU);
+      ctx.stroke();
+    }
+  }
+}
+
+// ============================================================
+// SOUND ENGINE
+// ============================================================
+class SoundEngine {
+  constructor() {
+    this.ctx = null;
+    this.initialized = false;
+    this.droneOscs = [];
+    this.droneGain = null;
+    this.droneFilter = null;
+    this.moveOsc = null;
+    this.moveGain = null;
+    this.reverb = null;
+    this.masterGain = null;
+    this.holdOsc = null;
+    this.holdGain = null;
+  }
+
+  init() {
+    if (this.initialized) return;
+    this.ctx = new (window.AudioContext || window.webkitAudioContext)();
+    this.initialized = true;
+
+    // Master output
+    this.masterGain = this.ctx.createGain();
+    this.masterGain.gain.value = 0.5;
+    this.masterGain.connect(this.ctx.destination);
+
+    // Reverb
+    this.reverb = this.createReverb(3.0);
+    this.reverb.connect(this.masterGain);
+
+    // Drone: 3 detuned sine oscillators
+    this.droneFilter = this.ctx.createBiquadFilter();
+    this.droneFilter.type = 'lowpass';
+    this.droneFilter.frequency.value = 800;
+    this.droneFilter.Q.value = 1;
+    this.droneFilter.connect(this.reverb);
+
+    this.droneGain = this.ctx.createGain();
+    this.droneGain.gain.value = 0.07;
+    this.droneGain.connect(this.droneFilter);
+
+    const baseFreq = 110; // A2
+    const droneFreqs = [baseFreq, baseFreq * 1.5, baseFreq * 2];
+    const detune = [-3, 0, 5];
+    for (let i = 0; i < 3; i++) {
+      const osc = this.ctx.createOscillator();
+      osc.type = 'sine';
+      osc.frequency.value = droneFreqs[i];
+      osc.detune.value = detune[i];
+      osc.connect(this.droneGain);
+      osc.start();
+      this.droneOscs.push(osc);
+    }
+
+    // Movement tone
+    this.moveGain = this.ctx.createGain();
+    this.moveGain.gain.value = 0;
+    const moveFilter = this.ctx.createBiquadFilter();
+    moveFilter.type = 'bandpass';
+    moveFilter.frequency.value = 600;
+    moveFilter.Q.value = 2;
+    this.moveGain.connect(moveFilter);
+    moveFilter.connect(this.reverb);
+
+    this.moveOsc = this.ctx.createOscillator();
+    this.moveOsc.type = 'triangle';
+    this.moveOsc.frequency.value = 440;
+    this.moveOsc.connect(this.moveGain);
+    this.moveOsc.start();
+
+    // Hold tone
+    this.holdGain = this.ctx.createGain();
+    this.holdGain.gain.value = 0;
+    this.holdGain.connect(this.reverb);
+
+    this.holdOsc = this.ctx.createOscillator();
+    this.holdOsc.type = 'sine';
+    this.holdOsc.frequency.value = 220;
+    this.holdOsc.connect(this.holdGain);
+    this.holdOsc.start();
+  }
+
+  createReverb(duration) {
+    const rate = this.ctx.sampleRate;
+    const length = rate * duration;
+    const buffer = this.ctx.createBuffer(2, length, rate);
+    for (let ch = 0; ch < 2; ch++) {
+      const data = buffer.getChannelData(ch);
+      for (let i = 0; i < length; i++) {
+        data[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / length, 2.5);
+      }
+    }
+    const convolver = this.ctx.createConvolver();
+    convolver.buffer = buffer;
+    return convolver;
+  }
+
+  quantizeToPentatonic(freq) {
+    const baseC = 261.63; // C4
+    const semitones = 12 * Math.log2(freq / baseC);
+    const octave = Math.floor(semitones / 12);
+    let remainder = ((semitones % 12) + 12) % 12;
+    // Snap to nearest pentatonic degree
+    let minDist = 99, snapped = 0;
+    for (const deg of PENTATONIC) {
+      const dist = Math.min(Math.abs(remainder - deg), 12 - Math.abs(remainder - deg));
+      if (dist < minDist) { minDist = dist; snapped = deg; }
+    }
+    return baseC * Math.pow(2, (octave * 12 + snapped) / 12);
+  }
+
+  updateMovement(normX, normY, velocity) {
+    if (!this.initialized) return;
+    try {
+      const rawFreq = 220 + normX * 660;
+      const freq = this.quantizeToPentatonic(rawFreq);
+      const now = this.ctx.currentTime;
+      this.moveOsc.frequency.setTargetAtTime(freq, now, 0.05);
+      const targetGain = Math.min(0.12, velocity * 0.0008);
+      this.moveGain.gain.setTargetAtTime(targetGain, now, 0.02);
+      const filterFreq = 200 + (1 - normY) * 1800;
+      this.droneFilter.frequency.setTargetAtTime(filterFreq, now, 0.1);
+    } catch(e) {}
+  }
+
+  fadeMovement() {
+    if (!this.initialized) return;
+    try { this.moveGain.gain.setTargetAtTime(0, this.ctx.currentTime, 0.3); } catch(e) {}
+  }
+
+  triggerClick(normX, normY) {
+    if (!this.initialized) return;
+    const now = this.ctx.currentTime;
+    const baseFreq = 261.63 + normX * 261.63; // C4-C5
+    const freq = this.quantizeToPentatonic(baseFreq);
+    const harmonics = [1, 1.5, 2, 2.52]; // root, fifth, octave, ~maj3 2 oct up
+    const gains = [0.15, 0.1, 0.08, 0.04];
+
+    for (let i = 0; i < harmonics.length; i++) {
+      const osc = this.ctx.createOscillator();
+      osc.type = 'sine';
+      osc.frequency.value = freq * harmonics[i];
+      const g = this.ctx.createGain();
+      g.gain.setValueAtTime(gains[i], now);
+      g.gain.exponentialRampToValueAtTime(0.001, now + 2.0);
+      osc.connect(g);
+      g.connect(this.reverb);
+      osc.start(now);
+      osc.stop(now + 2.0);
+    }
+
+    // Noise transient "ping"
+    const bufSize = this.ctx.sampleRate * 0.2;
+    const noiseBuf = this.ctx.createBuffer(1, bufSize, this.ctx.sampleRate);
+    const noiseData = noiseBuf.getChannelData(0);
+    for (let i = 0; i < bufSize; i++) noiseData[i] = Math.random() * 2 - 1;
+    const noiseSrc = this.ctx.createBufferSource();
+    noiseSrc.buffer = noiseBuf;
+    const noiseFilter = this.ctx.createBiquadFilter();
+    noiseFilter.type = 'bandpass';
+    noiseFilter.frequency.value = 3000;
+    noiseFilter.Q.value = 5;
+    const noiseGain = this.ctx.createGain();
+    noiseGain.gain.setValueAtTime(0.08, now);
+    noiseGain.gain.exponentialRampToValueAtTime(0.001, now + 0.15);
+    noiseSrc.connect(noiseFilter);
+    noiseFilter.connect(noiseGain);
+    noiseGain.connect(this.reverb);
+    noiseSrc.start(now);
+    noiseSrc.stop(now + 0.2);
+  }
+
+  startHold() {
+    if (!this.initialized) return;
+    try { this.holdGain.gain.setTargetAtTime(0.08, this.ctx.currentTime, 0.3); } catch(e) {}
+  }
+
+  updateHold(duration) {
+    if (!this.initialized) return;
+    try {
+      const freq = 220 + Math.min(duration * 30, 440);
+      this.holdOsc.frequency.setTargetAtTime(this.quantizeToPentatonic(freq), this.ctx.currentTime, 0.1);
+    } catch(e) {}
+  }
+
+  releaseHold() {
+    if (!this.initialized) return;
+    try { this.holdGain.gain.setTargetAtTime(0, this.ctx.currentTime, 0.5); } catch(e) {}
+  }
+
+  updateDroneRoot(time) {
+    if (!this.initialized || !isFinite(time) || time < 0) return;
+    try {
+      const roots = [110, 123.47, 130.81, 164.81, 185];
+      const idx = Math.floor(time / 45) % roots.length;
+      const nextIdx = (idx + 1) % roots.length;
+      const t = (time % 45) / 45;
+      const freq = roots[idx] + (roots[nextIdx] - roots[idx]) * t;
+      if (!isFinite(freq)) return;
+      const now = this.ctx.currentTime;
+      this.droneOscs[0].frequency.setTargetAtTime(freq, now, 2);
+      this.droneOscs[1].frequency.setTargetAtTime(freq * 1.5, now, 2);
+      this.droneOscs[2].frequency.setTargetAtTime(freq * 2, now, 2);
+    } catch(e) {}
+  }
+}
+
+// ============================================================
+// SPIRIT LIGHTS (idle state)
+// ============================================================
+class SpiritLights {
+  constructor() {
+    this.lights = [];
+    this.active = false;
+  }
+  spawn(W, H, hue) {
+    if (this.lights.length >= 5) return;
+    const edge = Math.random() < 0.5 ? -50 : W + 50;
+    this.lights.push({
+      x: edge, y: Math.random() * H, vx: (edge < 0 ? 1 : -1) * (20 + Math.random() * 30),
+      vy: 0, phase: Math.random() * TAU, size: 8 + Math.random() * 12, hue, life: 15, maxLife: 15, fadingOut: false
+    });
+    this.active = true;
+  }
+  fadeAll() {
+    for (const l of this.lights) l.fadingOut = true;
+  }
+  update(dt) {
+    for (let i = this.lights.length - 1; i >= 0; i--) {
+      const l = this.lights[i];
+      l.phase += dt * 1.5;
+      l.vy = Math.sin(l.phase) * 40;
+      l.x += l.vx * dt;
+      l.y += l.vy * dt;
+      if (l.fadingOut) l.life -= dt * 3;
+      else l.life -= dt * 0.05;
+      if (l.life <= 0) { this.lights.splice(i, 1); }
+    }
+    if (this.lights.length === 0) this.active = false;
+  }
+  draw(ctx) {
+    ctx.save();
+    ctx.globalCompositeOperation = 'screen';
+    for (const l of this.lights) {
+      const alpha = Math.min(1, l.life / l.maxLife) * 0.6;
+      const glowR = l.size * 4;
+      const grad = ctx.createRadialGradient(l.x, l.y, 0, l.x, l.y, glowR);
+      grad.addColorStop(0, `hsla(${l.hue|0}, 70%, 80%, ${(alpha * 0.9).toFixed(2)})`);
+      grad.addColorStop(0.3, `hsla(${l.hue|0}, 70%, 65%, ${(alpha * 0.5).toFixed(2)})`);
+      grad.addColorStop(1, `hsla(${l.hue|0}, 70%, 50%, 0)`);
+      ctx.fillStyle = grad;
+      ctx.beginPath();
+      ctx.arc(l.x, l.y, glowR, 0, TAU);
+      ctx.fill();
+    }
+    ctx.restore();
+  }
+}
+
+// ============================================================
+// RARE EVENTS
+// ============================================================
+class RareEvents {
+  constructor() {
+    this.timer = 15 + Math.random() * 20;
+    this.active = null;
+    this.progress = 0;
+  }
+  update(dt, totalTime) {
+    this.timer -= dt;
+    if (this.active) {
+      this.progress += dt;
+      if (this.progress > this.active.duration) this.active = null;
+    }
+    if (this.timer <= 0 && !this.active && totalTime > 30) {
+      this.timer = 20 + Math.random() * 25;
+      const events = ['colorWash', 'galaxySpiral', 'constellation'];
+      const type = events[Math.floor(Math.random() * events.length)];
+      this.active = { type, duration: type === 'colorWash' ? 3 : 5 };
+      this.progress = 0;
+    }
+  }
+  draw(ctx, W, H, colors, particles) {
+    if (!this.active) return;
+    const t = this.progress / this.active.duration;
+    const alpha = t < 0.2 ? t / 0.2 : t > 0.8 ? (1 - t) / 0.2 : 1;
+
+    ctx.save();
+    if (this.active.type === 'colorWash') {
+      const gradient = ctx.createLinearGradient(0, 0, W, H);
+      const h = colors.hueBase;
+      gradient.addColorStop(0, `hsla(${h|0}, 80%, 50%, ${(alpha * 0.12).toFixed(3)})`);
+      gradient.addColorStop(0.5, `hsla(${(h + 60)|0}, 80%, 50%, ${(alpha * 0.15).toFixed(3)})`);
+      gradient.addColorStop(1, `hsla(${(h + 120)|0}, 80%, 50%, ${(alpha * 0.12).toFixed(3)})`);
+      ctx.fillStyle = gradient;
+      ctx.fillRect(0, 0, W, H);
+    } else if (this.active.type === 'galaxySpiral') {
+      ctx.globalCompositeOperation = 'screen';
+      const cx = W / 2, cy = H / 2;
+      const arms = 3;
+      const dots = 150;
+      for (let arm = 0; arm < arms; arm++) {
+        for (let i = 0; i < dots; i++) {
+          const r = (i / dots) * Math.min(W, H) * 0.4;
+          const angle = (i / dots) * TAU * 2 + (arm / arms) * TAU + this.progress * 0.5;
+          const spread = (i / dots) * 15;
+          const sx = cx + Math.cos(angle) * r + (Math.random() - 0.5) * spread;
+          const sy = cy + Math.sin(angle) * r + (Math.random() - 0.5) * spread;
+          const dotAlpha = alpha * 0.4 * (1 - i / dots);
+          const hue = colors.hueBase + (i / dots) * 90;
+          ctx.fillStyle = `hsla(${hue|0}, 70%, 65%, ${dotAlpha.toFixed(2)})`;
+          ctx.beginPath();
+          ctx.arc(sx, sy, 1.5, 0, TAU);
+          ctx.fill();
+        }
+      }
+    } else if (this.active.type === 'constellation') {
+      ctx.globalCompositeOperation = 'screen';
+      // Connect nearby ambient particles
+      const count = Math.min(particles.count, 100);
+      ctx.lineWidth = 0.5;
+      for (let i = 0; i < count; i++) {
+        for (let j = i + 1; j < Math.min(i + 10, count); j++) {
+          const dx = particles.x[i] - particles.x[j];
+          const dy = particles.y[i] - particles.y[j];
+          const dist = Math.sqrt(dx * dx + dy * dy);
+          if (dist < 120) {
+            const lineAlpha = alpha * 0.3 * (1 - dist / 120);
+            ctx.strokeStyle = `hsla(${particles.hue[i]|0}, 60%, 60%, ${lineAlpha.toFixed(2)})`;
+            ctx.beginPath();
+            ctx.moveTo(particles.x[i], particles.y[i]);
+            ctx.lineTo(particles.x[j], particles.y[j]);
+            ctx.stroke();
+          }
+        }
+      }
+    }
+    ctx.restore();
+  }
+}
+
+// ============================================================
+// UTILITY
+// ============================================================
+function lerp(a, b, t) { return a + (b - a) * t; }
+
+// ============================================================
+// MAIN APP
+// ============================================================
+class App {
+  constructor() {
+    this.canvas = document.getElementById('c');
+    this.ctx = this.canvas.getContext('2d');
+    this.entry = document.getElementById('entry');
+    this.started = false;
+    this.time = 0;
+    this.lastTime = 0;
+
+    // Input state
+    this.mouseX = 0; this.mouseY = 0;
+    this.prevMouseX = 0; this.prevMouseY = 0;
+    this.mouseVel = 0;
+    this.mouseDown = false;
+    this.holdDuration = 0;
+    this.idleTime = 0;
+    this.lastRippleTime = 0;
+    this.flashAlpha = 0;
+
+    // Systems
+    this.breath = new BreathingSystem();
+    this.colors = new ColorSystem();
+    this.particles = new ParticlePool(MAX_PARTICLES);
+    this.ripples = new RippleSystem(MAX_RIPPLES);
+    this.trail = new TrailSystem(TRAIL_LENGTH);
+    this.geometry = new GeometryEngine();
+    this.sound = new SoundEngine();
+    this.spirits = new SpiritLights();
+    this.rareEvents = new RareEvents();
+
+    // Ambient particle init flag
+    this.ambientSpawned = false;
+
+    this.setupEvents();
+    this.resize();
+    window.addEventListener('resize', () => this.resize());
+  }
+
+  setupEvents() {
+    this.entry.addEventListener('click', () => {
+      this.entry.classList.add('hidden');
+      this.sound.init();
+      this.started = true;
+      this.lastTime = performance.now() / 1000;
+      this.mouseX = this.W / 2;
+      this.mouseY = this.H / 2;
+      requestAnimationFrame((t) => this.loop(t));
+    });
+
+    window.addEventListener('mousemove', (e) => {
+      this.prevMouseX = this.mouseX;
+      this.prevMouseY = this.mouseY;
+      this.mouseX = e.clientX;
+      this.mouseY = e.clientY;
+      const dx = this.mouseX - this.prevMouseX;
+      const dy = this.mouseY - this.prevMouseY;
+      this.mouseVel = Math.sqrt(dx * dx + dy * dy);
+      this.idleTime = 0;
+
+      if (this.spirits.active) this.spirits.fadeAll();
+    });
+
+    window.addEventListener('mousedown', (e) => {
+      if (!this.started) return;
+      this.mouseDown = true;
+      this.holdDuration = 0;
+      this.onMouseClick(e.clientX, e.clientY);
+    });
+
+    window.addEventListener('mouseup', () => {
+      if (this.mouseDown && this.holdDuration > 0.3) {
+        this.onMouseRelease();
+      }
+      this.mouseDown = false;
+      this.holdDuration = 0;
+      this.sound.releaseHold();
+    });
+
+    // Touch support
+    window.addEventListener('touchmove', (e) => {
+      e.preventDefault();
+      const t = e.touches[0];
+      this.prevMouseX = this.mouseX;
+      this.prevMouseY = this.mouseY;
+      this.mouseX = t.clientX;
+      this.mouseY = t.clientY;
+      const dx = this.mouseX - this.prevMouseX;
+      const dy = this.mouseY - this.prevMouseY;
+      this.mouseVel = Math.sqrt(dx * dx + dy * dy);
+      this.idleTime = 0;
+      if (this.spirits.active) this.spirits.fadeAll();
+    }, { passive: false });
+
+    window.addEventListener('touchstart', (e) => {
+      if (!this.started) return;
+      const t = e.touches[0];
+      this.mouseX = t.clientX;
+      this.mouseY = t.clientY;
+      this.mouseDown = true;
+      this.holdDuration = 0;
+      this.onMouseClick(t.clientX, t.clientY);
+    });
+
+    window.addEventListener('touchend', () => {
+      if (this.mouseDown && this.holdDuration > 0.3) this.onMouseRelease();
+      this.mouseDown = false;
+      this.holdDuration = 0;
+      this.sound.releaseHold();
+    });
+
+    // Fullscreen on double-click
+    window.addEventListener('dblclick', () => {
+      if (!document.fullscreenElement) {
+        document.documentElement.requestFullscreen?.();
+      } else {
+        document.exitFullscreen?.();
+      }
+    });
+  }
+
+  onMouseClick(x, y) {
+    // Explosion particles
+    const hue = this.colors.hslValues().h;
+    for (let i = 0; i < 80; i++) {
+      const angle = Math.random() * TAU;
+      const speed = 2 + Math.random() * 6;
+      this.particles.spawn(
+        x, y,
+        Math.cos(angle) * speed, Math.sin(angle) * speed,
+        1.0 + Math.random() * 1.5, 2 + Math.random() * 3,
+        hue + Math.random() * 40 - 20, 2
+      );
+    }
+
+    // Expanding ring ripple
+    this.ripples.spawn(x, y, hue);
+
+    // Flash
+    this.flashAlpha = 0.15;
+
+    // Geometry pulse
+    this.geometry.pulse();
+
+    // Sound
+    this.sound.triggerClick(x / this.W, y / this.H);
+
+    // Kick ambient particles away from click
+    for (let i = 0; i < this.particles.count; i++) {
+      if (this.particles.type[i] !== 0) continue;
+      const dx = this.particles.x[i] - x;
+      const dy = this.particles.y[i] - y;
+      const dist = Math.sqrt(dx * dx + dy * dy) + 1;
+      if (dist < 300) {
+        const force = (300 - dist) / 300 * 3;
+        this.particles.vx[i] += (dx / dist) * force;
+        this.particles.vy[i] += (dy / dist) * force;
+      }
+    }
+
+    this.sound.startHold();
+  }
+
+  onMouseRelease() {
+    // Burst outward from last position
+    const hue = this.colors.hslValues().h;
+    for (let i = 0; i < 30; i++) {
+      const angle = Math.random() * TAU;
+      const speed = 1 + Math.random() * 4;
+      this.particles.spawn(
+        this.mouseX, this.mouseY,
+        Math.cos(angle) * speed, Math.sin(angle) * speed,
+        0.8 + Math.random(), 1.5 + Math.random() * 2,
+        hue + 60 + Math.random() * 30, 3
+      );
+    }
+  }
+
+  resize() {
+    const dpr = window.devicePixelRatio || 1;
+    this.W = window.innerWidth;
+    this.H = window.innerHeight;
+    this.canvas.width = this.W * dpr;
+    this.canvas.height = this.H * dpr;
+    this.canvas.style.width = this.W + 'px';
+    this.canvas.style.height = this.H + 'px';
+    this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  }
+
+  spawnAmbientParticles() {
+    if (this.ambientSpawned) return;
+    this.ambientSpawned = true;
+    for (let i = 0; i < AMBIENT_COUNT; i++) {
+      const x = Math.random() * this.W;
+      const y = Math.random() * this.H;
+      const hue = Math.random() * 360;
+      this.particles.spawn(
+        x, y,
+        (Math.random() - 0.5) * 0.5, (Math.random() - 0.5) * 0.5,
+        9999, 1 + Math.random() * 2, hue, 0
+      );
+    }
+  }
+
+  loop(timestamp) {
+    requestAnimationFrame((t) => this.loop(t));
+    try {
+    const now = timestamp / 1000;
+    const dt = Math.min(now - this.lastTime, 0.05);
+    if (!isFinite(dt) || dt <= 0) return;
+    this.lastTime = now;
+    this.time += dt;
+    this.idleTime += dt;
+
+    // Spawn ambient on first frame
+    this.spawnAmbientParticles();
+
+    // Update systems
+    this.breath.update(dt);
+    this.colors.update(dt);
+    this.trail.update(dt);
+    this.particles.update(dt, this.mouseX, this.mouseY, this.breath);
+    this.ripples.update(dt);
+    this.geometry.update(dt, this.breath, this.W, this.H, this.mouseDown, this.mouseX, this.mouseY);
+    this.spirits.update(dt);
+    this.rareEvents.update(dt, this.time);
+    this.sound.updateDroneRoot(this.time);
+
+    // Mouse interactions
+    if (this.mouseVel > 0.5) {
+      this.trail.push(this.mouseX, this.mouseY);
+
+      // Trail particles
+      if (this.mouseVel > 2) {
+        const count = Math.min(3, Math.floor(this.mouseVel / 8));
+        const hue = this.colors.hslValues(this.mouseVel * 2).h;
+        for (let i = 0; i < count; i++) {
+          this.particles.spawn(
+            this.mouseX + (Math.random() - 0.5) * 10,
+            this.mouseY + (Math.random() - 0.5) * 10,
+            (Math.random() - 0.5) * 1.5, (Math.random() - 0.5) * 1.5,
+            0.5 + Math.random() * 0.8, 1 + Math.random() * 1.5,
+            hue + Math.random() * 20, 1
+          );
+        }
+      }
+
+      // Ripples on movement
+      if (this.time - this.lastRippleTime > 0.1) {
+        this.ripples.spawn(this.mouseX, this.mouseY, this.colors.hslValues().h);
+        this.lastRippleTime = this.time;
+      }
+
+      // Sound
+      this.sound.updateMovement(this.mouseX / this.W, this.mouseY / this.H, this.mouseVel);
+    } else {
+      this.sound.fadeMovement();
+    }
+
+    // Hold: vortex particles
+    if (this.mouseDown) {
+      this.holdDuration += dt;
+      this.sound.updateHold(this.holdDuration);
+      if (this.holdDuration > 0.2) {
+        for (let i = 0; i < 8; i++) {
+          const angle = this.time * 5 + i * TAU / 8;
+          const speed = 2 + Math.random() * 2;
+          const hue = this.colors.hslValues(this.holdDuration * 30).h;
+          this.particles.spawn(
+            this.mouseX, this.mouseY,
+            Math.cos(angle) * speed, Math.sin(angle) * speed,
+            0.6 + Math.random() * 0.6, 1.5 + Math.random(), hue, 3
+          );
+        }
+      }
+    }
+
+    // Idle: spirit lights
+    if (this.idleTime > 10) {
+      if (Math.random() < dt * 0.3) {
+        this.spirits.spawn(this.W, this.H, this.colors.hslValues(Math.random() * 60).h);
+      }
+    }
+
+    // Flash decay
+    if (this.flashAlpha > 0) this.flashAlpha *= 0.88;
+
+    // Decay mouse velocity
+    this.mouseVel *= 0.85;
+
+    // ---- RENDER ----
+    this.render(dt);
+
+    } catch(e) { /* never kill the loop */ }
+  }
+
+  render(dt) {
+    const ctx = this.ctx;
+    const W = this.W, H = this.H;
+
+    // Layer 0: Background
+    const bgBreath = this.breath.value;
+    const bgHue = this.colors.hslValues(-30).h;
+    const grad = ctx.createRadialGradient(
+      W / 2, H / 2, 0,
+      W / 2, H / 2, Math.max(W, H) * (0.6 + bgBreath * 0.15)
+    );
+    grad.addColorStop(0, `hsla(${bgHue|0}, 40%, ${8 + bgBreath * 4}%, 1)`);
+    grad.addColorStop(0.5, `hsla(${(bgHue + 20)|0}, 30%, ${4 + bgBreath * 2}%, 1)`);
+    grad.addColorStop(1, `hsla(${(bgHue + 40)|0}, 20%, 2%, 1)`);
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, W, H);
+
+    // Layer 1: Ambient particles (drawn by particle system)
+    // Layer 2: Sacred geometry
+    this.geometry.draw(ctx, W, H, this.colors, this.breath);
+
+    // Rare events
+    this.rareEvents.draw(ctx, W, H, this.colors, this.particles);
+
+    // Layer 3: Trail
+    this.trail.draw(ctx, this.colors, this.breath);
+
+    // Layer 4: Ripples
+    this.ripples.draw(ctx);
+
+    // All particles (ambient + trail + explosions + vortex)
+    this.particles.draw(ctx, this.colors);
+
+    // Spirit lights
+    this.spirits.draw(ctx);
+
+    // Layer 5: Flash
+    if (this.flashAlpha > 0.005) {
+      ctx.save();
+      ctx.globalCompositeOperation = 'screen';
+      const fh = this.colors.hslValues().h;
+      ctx.fillStyle = `hsla(${fh|0}, 60%, 80%, ${this.flashAlpha.toFixed(3)})`;
+      ctx.fillRect(0, 0, W, H);
+      ctx.restore();
+    }
+
+    // Layer 6: Vignette
+    const vigGrad = ctx.createRadialGradient(W / 2, H / 2, Math.min(W, H) * 0.3, W / 2, H / 2, Math.max(W, H) * 0.75);
+    vigGrad.addColorStop(0, 'rgba(0,0,0,0)');
+    vigGrad.addColorStop(1, 'rgba(0,0,0,0.5)');
+    ctx.fillStyle = vigGrad;
+    ctx.fillRect(0, 0, W, H);
+  }
+}
+
+// ============================================================
+// START
+// ============================================================
+new App();
+</script>
+</body>
+</html>
