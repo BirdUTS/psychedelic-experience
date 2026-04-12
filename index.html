@@ -409,70 +409,270 @@ class FourierMandala{
 // GEOMETRY ENGINE (4 sacred patterns)
 // ═══════════════════════════════════════════
 class GeometryEngine{
-  constructor(){this.pats=['flowerOfLife','metatronsCube','sriYantra','mandala'];this.cur=0;this.nxt=1;this.tp=1;this.tt=0;this.td=35+Math.random()*25;this.rot=0;this.ps=1;this.pv=0;this.cx=0;this.cy=0;}
+  constructor(){
+    this.pats=['flowerOfLife','metatronsCube','sriYantra','mandala','geodesicSphere','kaleidoPoly','spiralTower'];
+    this.cur=0;this.nxt=1;this.tp=1;this.tt=0;this.td=25+Math.random()*20;
+    this.rot=0;this.rotY=0;this.rotZ=0;this.ps=1;this.pv=0;this.cx=0;this.cy=0;
+    // Dynamic growth/shrink state
+    this.growPhase=0;this.growTarget=1;this.growCur=1;this.growSpeed=.3;
+    this.layerCount=1;this.layerTarget=5;this.layerGrow=0;
+    // 3D rotation angles for sphere projection
+    this.tiltX=0;this.tiltY=0;this.spinSpeed=.2;
+    // Morph params — continuous variation
+    this.morphA=0;this.morphB=0;this.morphC=0;
+    // Polygon sides morph (3=triangle up to 12=dodecagon)
+    this.polySides=6;this.polySidesTarget=6;
+  }
   update(dt,breath,W,H,mouseDown,mx,my,timeSys){
     const tsDrift=timeSys?Math.sin(timeSys.minutePhase)*.05:0;
-    this.rot+=dt*(.15+tsDrift)*(breath.value*.3+.85);this.tt+=dt;
-    this.pv*=.92;this.ps+=this.pv*dt;this.ps+=(1-this.ps)*dt*3;
+    this.rot+=dt*(.15+tsDrift)*(breath.value*.3+.85);
+    this.rotY+=dt*(.08+tsDrift*.5);this.rotZ+=dt*.03;
+    this.tt+=dt;this.pv*=.92;this.ps+=this.pv*dt;this.ps+=(1-this.ps)*dt*3;
     this.cx=lerp(this.cx||W/2,mouseDown?lerp(W/2,mx,.3):W/2,dt*2);
     this.cy=lerp(this.cy||H/2,mouseDown?lerp(H/2,my,.3):H/2,dt*2);
-    if(this.tt>this.td&&this.tp>=1){this.tt=0;this.td=30+Math.random()*30;this.nxt=(this.cur+1)%this.pats.length;this.tp=0;}
-    if(this.tp<1){this.tp+=dt*.25;if(this.tp>=1){this.tp=1;this.cur=this.nxt;}}
+    // Growth / shrink cycle
+    this.growPhase+=dt*.15;
+    this.growTarget=.6+.5*Math.sin(this.growPhase)+.2*Math.sin(this.growPhase*2.3);
+    this.growCur=lerp(this.growCur,this.growTarget,dt*this.growSpeed);
+    // Layer count grows and shrinks
+    this.layerGrow+=dt*.08;
+    this.layerTarget=3+Math.floor(2.5+2.5*Math.sin(this.layerGrow));
+    this.layerCount=lerp(this.layerCount,this.layerTarget,dt*.5);
+    // 3D tilt
+    this.tiltX=Math.sin(this.rotY*.7)*.4;
+    this.tiltY=Math.cos(this.rotY*.5)*.35;
+    // Morph variables — each on different frequencies
+    this.morphA=Math.sin(this.tt*.13)*Math.cos(this.tt*.07);
+    this.morphB=Math.sin(this.tt*.09+1.5)*Math.cos(this.tt*.17);
+    this.morphC=Math.sin(this.tt*.21+3.0);
+    // Polygon sides slowly morph
+    if(Math.random()<dt*.1)this.polySidesTarget=3+Math.floor(Math.random()*10);
+    this.polySides=lerp(this.polySides,this.polySidesTarget,dt*.3);
+    // Pattern transition
+    if(this.tt>this.td&&this.tp>=1){this.tt=0;this.td=20+Math.random()*20;this.nxt=(this.cur+1)%this.pats.length;this.tp=0;}
+    if(this.tp<1){this.tp+=dt*.2;if(this.tp>=1){this.tp=1;this.cur=this.nxt;}}
   }
   pulse(){this.pv=3;}
+  // 3D point → 2D with perspective
+  _p3d(x,y,z,sz){
+    const cx=Math.cos(this.tiltX),sx=Math.sin(this.tiltX),cy=Math.cos(this.tiltY),sy=Math.sin(this.tiltY);
+    let y1=y*cx-z*sx,z1=y*sx+z*cx;let x1=x*cy+z1*sy;z1=-x*sy+z1*cy;
+    const per=1.2/(1.2+z1/(sz*2));
+    return{x:x1*per*sz,y:y1*per*sz,z:z1,s:per};
+  }
+  // Draw regular polygon (any number of sides)
+  _poly(ctx,x,y,r,sides,rot){
+    const n=Math.max(3,Math.round(sides));
+    ctx.beginPath();
+    for(let i=0;i<=n;i++){const a=rot+(i/n)*TAU;const px=x+Math.cos(a)*r,py=y+Math.sin(a)*r;i===0?ctx.moveTo(px,py):ctx.lineTo(px,py);}
+    ctx.closePath();
+  }
   draw(ctx,W,H,colors,breath){
-    const sz=Math.min(W,H)*.3*breath.scale*this.ps;
+    const sz=Math.min(W,H)*.3*breath.scale*this.ps*(.8+this.growCur*.4);
     ctx.save();ctx.globalCompositeOperation='lighter';ctx.translate(this.cx,this.cy);ctx.rotate(this.rot);
-    if(this.tp<1){ctx.globalAlpha=1-this.tp*.3;this._dp(ctx,this.pats[this.cur],sz,colors,breath);ctx.globalAlpha=this.tp;this._dp(ctx,this.pats[this.nxt],sz,colors,breath);}
+    if(this.tp<1){ctx.globalAlpha=clamp(1-this.tp*.5,0,1);this._dp(ctx,this.pats[this.cur],sz,colors,breath);ctx.globalAlpha=clamp(this.tp,0,1);this._dp(ctx,this.pats[this.nxt],sz,colors,breath);}
     else{ctx.globalAlpha=1;this._dp(ctx,this.pats[this.cur],sz,colors,breath);}
     ctx.restore();
   }
   _dp(ctx,name,sz,co,br){
-    if(name==='flowerOfLife')this._fol(ctx,sz,co,br);
-    else if(name==='metatronsCube')this._mc(ctx,sz,co,br);
-    else if(name==='sriYantra')this._sy(ctx,sz,co,br);
-    else this._mandala(ctx,sz,co,br);
+    switch(name){
+      case'flowerOfLife':this._fol(ctx,sz,co,br);break;
+      case'metatronsCube':this._mc(ctx,sz,co,br);break;
+      case'sriYantra':this._sy(ctx,sz,co,br);break;
+      case'mandala':this._mandala(ctx,sz,co,br);break;
+      case'geodesicSphere':this._geo(ctx,sz,co,br);break;
+      case'kaleidoPoly':this._kp(ctx,sz,co,br);break;
+      case'spiralTower':this._spiral(ctx,sz,co,br);break;
+    }
   }
   _fol(ctx,sz,co,br){
-    const r=sz*.25,cs=[{x:0,y:0}];
-    for(let i=0;i<6;i++){const a=i*TAU/6;cs.push({x:Math.cos(a)*r,y:Math.sin(a)*r});}
-    for(let i=0;i<6;i++){const a=i*TAU/6;cs.push({x:Math.cos(a)*r*2,y:Math.sin(a)*r*2});cs.push({x:Math.cos((i+.5)*TAU/6)*r*1.732,y:Math.sin((i+.5)*TAU/6)*r*1.732});}
-    for(let i=0;i<cs.length;i++){
-      const c=cs[i],bR=r*(1+.03*Math.sin(br.phase+i*.2));
-      // Solid fill with glow
-      const fillA=(.12+.08*Math.sin(br.phase+i*.3)).toFixed(2);
-      ctx.fillStyle=co.hsl((i/cs.length)*180,parseFloat(fillA));
-      ctx.beginPath();ctx.arc(c.x,c.y,bR,0,TAU);ctx.fill();
-      ctx.strokeStyle=co.hsl((i/cs.length)*180,.95);ctx.lineWidth=2.5;ctx.stroke();
+    // Flower of Life — circles grow outward in waves
+    const r=sz*.22*this.growCur,rings=Math.round(this.layerCount),cs=[];
+    cs.push({x:0,y:0,ring:0});
+    for(let ring=1;ring<=rings;ring++){
+      const n=6*ring,rDist=r*ring*(.9+.1*Math.sin(br.phase+ring));
+      for(let i=0;i<n;i++){
+        const a=(i/n)*TAU+br.phase*.02*ring;
+        const wobble=1+.08*Math.sin(br.phase*2+i*.5+ring);
+        cs.push({x:Math.cos(a)*rDist*wobble,y:Math.sin(a)*rDist*wobble,ring});
+      }
     }
+    for(let i=0;i<cs.length;i++){
+      const c=cs[i],grow=clamp((this.layerCount-c.ring+1),0,1);
+      const bR=r*(.6+.4*grow)*(1+.06*Math.sin(br.phase+i*.3));
+      const sides=this.polySides+c.ring*.5;
+      // Rich solid fill
+      ctx.fillStyle=co.hsl((i/cs.length)*240+c.ring*40,.25+.15*Math.sin(br.phase+i*.2));
+      this._poly(ctx,c.x,c.y,bR*grow,sides,br.phase*.05+c.ring*.2);ctx.fill();
+      ctx.strokeStyle=co.hsl((i/cs.length)*240+c.ring*40,.8);ctx.lineWidth=1.5+grow;ctx.stroke();
+    }
+    // Center glow
+    const g=ctx.createRadialGradient(0,0,0,0,0,r*1.5);
+    g.addColorStop(0,co.hsl(br.phase*20%360,.3));g.addColorStop(1,'rgba(0,0,0,0)');
+    ctx.fillStyle=g;ctx.beginPath();ctx.arc(0,0,r*1.5,0,TAU);ctx.fill();
   }
   _mc(ctx,sz,co,br){
-    const r1=sz*.3,r2=sz*.55,ns=[{x:0,y:0}];
-    for(let i=0;i<6;i++){const a=i*TAU/6+br.phase*.05;ns.push({x:Math.cos(a)*r1,y:Math.sin(a)*r1});}
-    for(let i=0;i<6;i++){const a=(i+.5)*TAU/6+br.phase*.03;ns.push({x:Math.cos(a)*r2,y:Math.sin(a)*r2});}
-    // Draw filled triangles between connected nodes
-    for(let i=1;i<7;i++){const j=(i%6)+1;
-      ctx.fillStyle=co.hsl(i*60,.12+.06*Math.sin(br.phase+i));
+    // Metatron's Cube — 3D projected with growth
+    const r1=sz*.3*this.growCur,r2=sz*.55*this.growCur,ns=[];
+    ns.push(this._p3d(0,0,0,sz));
+    const innerN=Math.round(3+this.morphA*1.5+3.5);
+    const outerN=Math.round(3+this.morphB*1.5+3.5);
+    for(let i=0;i<innerN;i++){const a=i*TAU/innerN+br.phase*.05;const z=Math.sin(a*2+br.phase)*.3;ns.push(this._p3d(Math.cos(a)*r1,Math.sin(a)*r1,z*sz*.2,sz));}
+    for(let i=0;i<outerN;i++){const a=(i+.5)*TAU/outerN+br.phase*.03;const z=Math.cos(a*3+br.phase)*.2;ns.push(this._p3d(Math.cos(a)*r2,Math.sin(a)*r2,z*sz*.3,sz));}
+    // Sort by z for proper depth
+    const sorted=ns.map((n,i)=>({...n,i})).sort((a,b)=>a.z-b.z);
+    // Filled polygons between center and inner ring
+    for(let i=1;i<=innerN;i++){const j=(i%innerN)+1;
+      ctx.fillStyle=co.hsl(i*(360/innerN),.2+.1*Math.sin(br.phase+i));
       ctx.beginPath();ctx.moveTo(ns[0].x,ns[0].y);ctx.lineTo(ns[i].x,ns[i].y);ctx.lineTo(ns[j].x,ns[j].y);ctx.closePath();ctx.fill();
     }
-    ctx.lineWidth=1.2;
-    for(let i=0;i<ns.length;i++)for(let j=i+1;j<ns.length;j++){const dx=ns[j].x-ns[i].x,dy=ns[j].y-ns[i].y,ang=Math.atan2(dy,dx),dist=Math.sqrt(dx*dx+dy*dy),al=.5+.3*Math.sin(br.phase+dist*.01);ctx.strokeStyle=co.hsl((ang/TAU)*360,Math.max(0,al));ctx.beginPath();ctx.moveTo(ns[i].x,ns[i].y);ctx.lineTo(ns[j].x,ns[j].y);ctx.stroke();}
-    for(let i=0;i<ns.length;i++){ctx.fillStyle=co.hsl((i/ns.length)*180,1);ctx.beginPath();ctx.arc(ns[i].x,ns[i].y,5+2*Math.sin(br.phase+i),0,TAU);ctx.fill();}
+    // Connection lines with depth fade
+    ctx.lineWidth=1;
+    for(let i=0;i<ns.length;i++)for(let j=i+1;j<ns.length;j++){
+      const dx=ns[j].x-ns[i].x,dy=ns[j].y-ns[i].y,dist=Math.sqrt(dx*dx+dy*dy);
+      if(dist>sz*1.2)continue;
+      const dep=(.5+ns[i].s*.25)*(.5+ns[j].s*.25);
+      ctx.strokeStyle=co.hsl(Math.atan2(dy,dx)/TAU*360,.35*dep);
+      ctx.beginPath();ctx.moveTo(ns[i].x,ns[i].y);ctx.lineTo(ns[j].x,ns[j].y);ctx.stroke();
+    }
+    // Nodes — bigger when closer, solid fill
+    for(const n of sorted){
+      const nr=clamp(3+5*n.s,2,12);
+      ctx.fillStyle=co.hsl((n.i/ns.length)*300,.6+.4*n.s);
+      ctx.beginPath();ctx.arc(n.x,n.y,nr,0,TAU);ctx.fill();
+    }
   }
   _sy(ctx,sz,co,br){
-    const s=sz*.5;
-    const U=[[[-0.8,.5],[.8,.5],[0,-.7]],[[-0.65,.35],[.65,.35],[0,-.55]],[[-0.5,.2],[.5,.2],[0,-.4]],[[-0.3,.08],[.3,.08],[0,-.22]]];
-    const D=[[[-0.75,-.45],[.75,-.45],[0,.65]],[[-0.6,-.32],[.6,-.32],[0,.52]],[[-0.48,-.22],[.48,-.22],[0,.38]],[[-0.35,-.12],[.35,-.12],[0,.25]],[[-0.2,-.04],[.2,-.04],[0,.13]]];
-    const dt=(tris,hs)=>tris.forEach((tri,idx)=>{const ph=br.phase+idx*.5,bo=.01*Math.sin(ph);ctx.fillStyle=co.hsl(hs+idx*25,.15+.1*Math.sin(ph));ctx.strokeStyle=co.hsl(hs+idx*25,.75+.2*Math.sin(ph));ctx.lineWidth=2;ctx.beginPath();ctx.moveTo(tri[0][0]*s*(1+bo),tri[0][1]*s*(1+bo));ctx.lineTo(tri[1][0]*s*(1+bo),tri[1][1]*s*(1+bo));ctx.lineTo(tri[2][0]*s*(1+bo),tri[2][1]*s*(1+bo));ctx.closePath();ctx.fill();ctx.stroke();});
-    dt(U,0);dt(D,180);
-    for(let i=0;i<3;i++){ctx.strokeStyle=co.hsl(i*40,.45+.2*Math.sin(br.phase+i));ctx.lineWidth=1.2;ctx.beginPath();ctx.arc(0,0,s*(.85+i*.06),0,TAU);ctx.stroke();}
+    // Sri Yantra — breathing triangles with 3D depth and morphing
+    const s=sz*.5*this.growCur,depth=this.morphC*.15;
+    const layerN=Math.round(2+this.layerCount*.6);
+    const U=[],D=[];
+    for(let i=0;i<layerN;i++){const t=i/(layerN-1),sc=.9-t*.7;
+      U.push([[-sc*(1+this.morphA*.15),sc*.6-t*.1],[sc*(1+this.morphA*.15),sc*.6-t*.1],[0,-sc*.8+t*.05]]);
+      D.push([[-sc*(1+this.morphB*.1),-sc*.55+t*.08],[sc*(1+this.morphB*.1),-sc*.55+t*.08],[0,sc*.7-t*.05]]);
+    }
+    const dt=(tris,hs,dir)=>tris.forEach((tri,idx)=>{
+      const ph=br.phase+idx*.5,bo=.02*Math.sin(ph),zOff=depth*Math.sin(ph+idx);
+      const p=tri.map(v=>this._p3d(v[0]*s*(1+bo),v[1]*s*(1+bo),zOff*sz,sz));
+      const avgS=(p[0].s+p[1].s+p[2].s)/3;
+      ctx.fillStyle=co.hsl(hs+idx*30,.25*avgS+.1*Math.sin(ph));
+      ctx.strokeStyle=co.hsl(hs+idx*30,(.7+.2*Math.sin(ph))*avgS);
+      ctx.lineWidth=2*avgS;ctx.beginPath();ctx.moveTo(p[0].x,p[0].y);ctx.lineTo(p[1].x,p[1].y);ctx.lineTo(p[2].x,p[2].y);ctx.closePath();ctx.fill();ctx.stroke();
+    });
+    dt(U,0,1);dt(D,180,-1);
+    // Concentric rings that expand/contract
+    for(let i=0;i<4;i++){
+      const rr=s*(.6+i*.12)*(1+.08*Math.sin(br.phase*1.5+i));
+      const sides=Math.round(this.polySides+i*2);
+      ctx.strokeStyle=co.hsl(i*50,.4+.2*Math.sin(br.phase+i));ctx.lineWidth=1.5;
+      this._poly(ctx,0,0,rr,sides,br.phase*.03+i*.1);ctx.stroke();
+    }
+    // Center bindu — solid glowing
+    const bR=s*.06*(1+.3*Math.sin(br.phase*2));
+    ctx.fillStyle=co.hsl(br.phase*15%360,.9);ctx.beginPath();ctx.arc(0,0,bR,0,TAU);ctx.fill();
+    ctx.shadowColor=co.hsl(br.phase*15%360,.5);ctx.shadowBlur=bR*3;ctx.fill();ctx.shadowBlur=0;
   }
   _mandala(ctx,sz,co,br){
-    const sym=12,layers=5;
+    // Mandala — variable symmetry, varied shapes per layer, expanding/contracting
+    const sym=Math.round(6+this.morphA*3+3),layers=Math.round(this.layerCount+1);
     for(let l=0;l<layers;l++){
-      const r=sz*(.15+l*.15),al=.6+.25*Math.sin(br.phase+l*.8),dir=l%2?1:-1;
-      for(let i=0;i<sym;i++){const a=(i/sym)*TAU+br.phase*.1*dir,pR=r*.35*(1+.1*Math.sin(br.phase+i*.5));ctx.fillStyle=co.hsl((i/sym)*60+l*30,al*.5);ctx.strokeStyle=co.hsl((i/sym)*60+l*30,al);ctx.lineWidth=1.8;ctx.save();ctx.rotate(a);ctx.beginPath();ctx.ellipse(r,0,pR,pR*.4,0,0,TAU);ctx.fill();ctx.stroke();ctx.restore();}
-      ctx.strokeStyle=co.hsl(l*50,al*.5);ctx.lineWidth=.8;ctx.beginPath();ctx.arc(0,0,r,0,TAU);ctx.stroke();
+      const grow=clamp(this.layerCount-l+.5,0,1);
+      const r=sz*(.1+l*.14)*this.growCur*grow,al=.65+.3*Math.sin(br.phase+l*.8),dir=l%2?1:-1;
+      const shapeSides=Math.round(3+l*1.5+this.morphB*2);
+      for(let i=0;i<sym;i++){
+        const a=(i/sym)*TAU+br.phase*(.08+l*.02)*dir;
+        const pR=r*(.3+.15*Math.sin(br.phase+i*.5+l))*(1+this.morphC*.15);
+        const pR2=pR*(.3+.35*Math.sin(br.phase*.7+l+i));
+        ctx.save();ctx.rotate(a);
+        // Varied solid-filled shapes
+        ctx.fillStyle=co.hsl((i/sym)*60+l*35,al*.6*grow);
+        ctx.strokeStyle=co.hsl((i/sym)*60+l*35,al*.9*grow);ctx.lineWidth=1.5;
+        if(l%3===0){
+          // Regular polygon
+          this._poly(ctx,r,0,pR,shapeSides,br.phase*.1+i);ctx.fill();ctx.stroke();
+        }else if(l%3===1){
+          // Diamond/rhombus
+          ctx.beginPath();ctx.moveTo(r-pR,0);ctx.lineTo(r,pR2);ctx.lineTo(r+pR,0);ctx.lineTo(r,-pR2);ctx.closePath();ctx.fill();ctx.stroke();
+        }else{
+          // Teardrop / petal
+          ctx.beginPath();ctx.moveTo(r-pR*.5,0);
+          ctx.bezierCurveTo(r-pR*.3,pR2,r+pR,pR2*.6,r+pR,0);
+          ctx.bezierCurveTo(r+pR,-pR2*.6,r-pR*.3,-pR2,r-pR*.5,0);
+          ctx.fill();ctx.stroke();
+        }
+        ctx.restore();
+      }
+      // Ring outline — polygon instead of circle
+      ctx.strokeStyle=co.hsl(l*50,al*.3*grow);ctx.lineWidth=.8;
+      this._poly(ctx,0,0,r,sym,br.phase*.02*dir);ctx.stroke();
+    }
+  }
+  _geo(ctx,sz,co,br){
+    // Geodesic Sphere — 3D icosphere projection with solid facets
+    const r=sz*.45*this.growCur;
+    const phi=(1+Math.sqrt(5))/2;
+    // Icosahedron vertices (normalized)
+    const iv=[[-1,phi,0],[1,phi,0],[-1,-phi,0],[1,-phi,0],[0,-1,phi],[0,1,phi],[0,-1,-phi],[0,1,-phi],[phi,0,-1],[phi,0,1],[-phi,0,-1],[-phi,0,1]];
+    iv.forEach(v=>{const l=Math.sqrt(v[0]*v[0]+v[1]*v[1]+v[2]*v[2]);v[0]/=l;v[1]/=l;v[2]/=l;});
+    // Icosahedron faces
+    const faces=[[0,11,5],[0,5,1],[0,1,7],[0,7,10],[0,10,11],[1,5,9],[5,11,4],[11,10,2],[10,7,6],[7,1,8],[3,9,4],[3,4,2],[3,2,6],[3,6,8],[3,8,9],[4,9,5],[2,4,11],[6,2,10],[8,6,7],[9,8,1]];
+    // Project all vertices with breathing distortion
+    const projected=iv.map((v,i)=>{
+      const wobble=1+.08*Math.sin(br.phase+i*.7)+.05*this.morphA*Math.sin(br.phase*2+i);
+      return this._p3d(v[0]*r*wobble,v[1]*r*wobble,v[2]*r*wobble,sz);
+    });
+    // Sort faces by average z (painter's algorithm)
+    const sortedFaces=faces.map((f,i)=>{
+      const avgZ=(projected[f[0]].z+projected[f[1]].z+projected[f[2]].z)/3;
+      return{f,avgZ,i};
+    }).sort((a,b)=>a.avgZ-b.avgZ);
+    // Draw faces — solid fill with depth-based color
+    for(const{f,i}of sortedFaces){
+      const p0=projected[f[0]],p1=projected[f[1]],p2=projected[f[2]];
+      const avgS=(p0.s+p1.s+p2.s)/3;
+      const hue=(i*18+br.phase*10)%360;
+      ctx.fillStyle=co.hsl(hue,.3*avgS+.1*Math.sin(br.phase+i));
+      ctx.strokeStyle=co.hsl(hue,(.6+.3*avgS));
+      ctx.lineWidth=1.2*avgS;
+      ctx.beginPath();ctx.moveTo(p0.x,p0.y);ctx.lineTo(p1.x,p1.y);ctx.lineTo(p2.x,p2.y);ctx.closePath();ctx.fill();ctx.stroke();
+    }
+  }
+  _kp(ctx,sz,co,br){
+    // Kaleidoscopic Polygon — nested rotating polygons with fills
+    const layers=Math.round(this.layerCount+2);
+    for(let l=layers-1;l>=0;l--){
+      const grow=clamp(this.layerCount-l+1,0,1);
+      const r=sz*(.08+l*.1)*this.growCur*grow;
+      const sides=Math.round(3+l*1.2+this.morphA*1.5);
+      const rotDir=l%2?1:-1;const lRot=this.rot*(.5+l*.15)*rotDir+l*.3;
+      // Solid filled polygon
+      ctx.fillStyle=co.hsl(l*45+br.phase*8%360,.35+.15*Math.sin(br.phase+l)*grow);
+      ctx.strokeStyle=co.hsl(l*45+br.phase*8%360,(.7+.2*Math.sin(br.phase+l))*grow);
+      ctx.lineWidth=2;
+      this._poly(ctx,0,0,r,sides,lRot);ctx.fill();ctx.stroke();
+      // Inner detail — smaller polygon offset
+      if(l>0){
+        const r2=r*.55,sides2=Math.max(3,sides-1);
+        ctx.fillStyle=co.hsl(l*45+30+br.phase*12%360,.2*grow);
+        this._poly(ctx,0,0,r2,sides2,lRot*-1.3+br.phase*.1);ctx.fill();
+        ctx.strokeStyle=co.hsl(l*45+30,.5*grow);ctx.lineWidth=1;ctx.stroke();
+      }
+    }
+  }
+  _spiral(ctx,sz,co,br){
+    // Spiral Tower — 3D helix of shapes rising and falling
+    const n=Math.round(20+this.layerCount*8);const h=sz*.8*this.growCur;
+    for(let i=0;i<n;i++){
+      const t=i/n;const angle=t*TAU*3+br.phase*.3;
+      const y3d=(t-.5)*h;const x3d=Math.cos(angle)*sz*.25*(1+.2*Math.sin(br.phase+t*5));
+      const z3d=Math.sin(angle)*sz*.25*(1+.2*Math.sin(br.phase+t*5));
+      const p=this._p3d(x3d,y3d,z3d,sz);
+      const sides=Math.round(3+t*this.polySides);
+      const r=clamp(8+12*p.s,3,25)*(1+.2*Math.sin(br.phase+i*.3));
+      ctx.fillStyle=co.hsl(t*360+br.phase*15%360,.35+.25*p.s);
+      ctx.strokeStyle=co.hsl(t*360+br.phase*15%360,.7+.25*p.s);
+      ctx.lineWidth=1+p.s;
+      this._poly(ctx,p.x,p.y,r,sides,angle+br.phase*.1);ctx.fill();ctx.stroke();
     }
   }
 }
