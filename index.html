@@ -17,7 +17,7 @@ canvas{display:block;width:100vw;height:100vh;cursor:none;}
 #mic-btn.active{background:rgba(60,180,120,.2);color:#80ffcc;border-color:#80ffcc;}
 @keyframes breathe{0%,100%{opacity:.4;transform:scale(1);}50%{opacity:1;transform:scale(1.03);}}
 /* Phase / Layer control panel */
-#hud{position:fixed;bottom:18px;left:50%;transform:translateX(-50%);display:flex;gap:8px;z-index:20;opacity:0;transition:opacity .4s;pointer-events:none;}
+#hud{position:fixed;bottom:65px;left:50%;transform:translateX(-50%);display:flex;gap:8px;z-index:20;opacity:0;transition:opacity .4s;pointer-events:none;}
 #hud.visible{opacity:1;pointer-events:all;}
 .hud-btn{padding:5px 12px;border:1px solid rgba(160,100,220,.4);border-radius:14px;background:rgba(20,0,40,.55);color:rgba(180,130,255,.8);font-family:Georgia,serif;font-size:.7rem;letter-spacing:.08em;cursor:pointer;transition:all .25s;backdrop-filter:blur(4px);}
 .hud-btn:hover{border-color:rgba(200,150,255,.7);color:#d0a0ff;}
@@ -145,21 +145,24 @@ class ColorSystem{
 // MICROPHONE SYSTEM  (FFT → bass/mid/treble)
 // ═══════════════════════════════════════════
 class MicrophoneSystem{
-  constructor(){this.active=false;this.bass=0;this.mid=0;this.treble=0;this.volume=0;this.analyser=null;this.data=null;}
+  constructor(){this.active=false;this.bass=0;this.mid=0;this.treble=0;this.volume=0;this.analyser=null;this.data=null;this.rawFFT=new Uint8Array(128);this.initError='';}
   async init(actx){
     try{
       const stream=await navigator.mediaDevices.getUserMedia({audio:true,video:false});
       this.analyser=actx.createAnalyser();this.analyser.fftSize=256;this.analyser.smoothingTimeConstant=.8;
       actx.createMediaStreamSource(stream).connect(this.analyser);
       this.data=new Uint8Array(this.analyser.frequencyBinCount);
+      this.rawFFT=new Uint8Array(this.analyser.frequencyBinCount);
       this.active=true;
       document.getElementById('mic-btn').classList.add('active');
       document.getElementById('mic-btn').textContent='🎤 Microphone Active';
-    }catch(e){this.active=false;}
+    }catch(e){this.active=false;this.initError=e.message||'Permission denied';}
   }
   update(){
     if(!this.active||!this.analyser)return;
     this.analyser.getByteFrequencyData(this.data);
+    // Copy raw FFT for debug display
+    this.rawFFT.set(this.data);
     const n=this.data.length;let b=0,m=0,tr=0,v=0;
     for(let i=0;i<n;i++){const x=this.data[i]/255;v+=x;if(i<n*.08)b+=x;else if(i<n*.5)m+=x;else tr+=x;}
     const S=.8;
@@ -167,6 +170,63 @@ class MicrophoneSystem{
     this.mid   =lerp(m/(n*.42),   this.mid,   S);
     this.treble=lerp(tr/(n*.5),   this.treble,S);
     this.volume=lerp(v/n,         this.volume,S);
+  }
+  // Draw full-width audio debug bar at bottom of canvas
+  drawDebug(ctx,W,H){
+    const barH=55,y=H-barH;
+    // Dark background strip
+    ctx.fillStyle='rgba(0,0,0,.7)';ctx.fillRect(0,y,W,barH);
+    // Divider line
+    ctx.strokeStyle='rgba(255,255,255,.15)';ctx.lineWidth=1;ctx.beginPath();ctx.moveTo(0,y);ctx.lineTo(W,y);ctx.stroke();
+    // Status text
+    ctx.font='bold 11px monospace';
+    if(this.active){
+      ctx.fillStyle='#00ff88';ctx.fillText('🎤 MIC ACTIVE',8,y+14);
+    }else{
+      ctx.fillStyle='#ff6644';ctx.fillText('⚠ MIC OFF — using simulated audio',8,y+14);
+      if(this.initError){ctx.fillStyle='#ff4444';ctx.fillText('Error: '+this.initError,8,y+28);}
+    }
+    // Draw bass/mid/treble/volume values
+    const vals=[
+      {label:'BASS',v:this.bass,c:'#ff4466'},
+      {label:'MID',v:this.mid,c:'#44ff88'},
+      {label:'TREBLE',v:this.treble,c:'#4488ff'},
+      {label:'VOL',v:this.volume,c:'#ffcc44'}
+    ];
+    const vx=W*.45;
+    ctx.font='9px monospace';
+    vals.forEach((d,i)=>{
+      const x=vx+i*80,bw=50,bh=10,by=y+8;
+      // Label
+      ctx.fillStyle=d.c;ctx.fillText(d.label+' '+d.v.toFixed(2),x,by);
+      // Bar bg
+      ctx.fillStyle='rgba(255,255,255,.1)';ctx.fillRect(x,by+3,bw,bh);
+      // Bar fill
+      ctx.fillStyle=d.c;ctx.fillRect(x,by+3,bw*Math.min(1,d.v),bh);
+    });
+    // FFT frequency bars (full width)
+    const fftY=y+26,fftH=barH-28,n=this.active?this.rawFFT.length:64;
+    const barW=W/n;
+    for(let i=0;i<n;i++){
+      let val;
+      if(this.active){
+        val=this.rawFFT[i]/255;
+      }else{
+        // Show simulated values as bars too
+        const t=performance.now()/1000;
+        val=i<n*.08?this.bass*.8+.1*Math.sin(t*3+i):i<n*.5?this.mid*.6+.1*Math.sin(t*2+i*.3):this.treble*.5+.08*Math.sin(t*4+i*.5);
+        val=Math.max(0,Math.min(1,val));
+      }
+      const h=val*fftH;
+      if(h<.5)continue;
+      // Color: red for bass, green for mid, blue for treble
+      const ratio=i/n;
+      const r=ratio<.08?255:ratio<.5?Math.floor(70*(1-ratio)):70;
+      const g=ratio<.08?70:ratio<.5?255:Math.floor(140*(1-ratio));
+      const b=ratio<.5?100:255;
+      ctx.fillStyle=`rgba(${r},${g},${b},${.5+val*.4})`;
+      ctx.fillRect(i*barW,fftY+fftH-h,Math.max(1,barW-.5),h);
+    }
   }
   fallback(t){
     // Richer synthetic audio: multiple overlapping waves + occasional bass "hits"
@@ -939,20 +999,8 @@ class App{
     const vig=ctx.createRadialGradient(W/2,H/2,Math.min(W,H)*.3,W/2,H/2,Math.max(W,H)*.75);
     vig.addColorStop(0,'rgba(0,0,0,0)');vig.addColorStop(1,'rgba(0,0,0,.5)');ctx.fillStyle=vig;ctx.fillRect(0,0,W,H);
 
-    // Audio meter (small bars in bottom-right, shows bass/mid/treble levels)
-    if(this.mic.active||true){// always show — so user can see fallback vs real mic
-      const mx=W-60,my=H-50,bw=10,bh=30,gap=5;
-      const levels=[{v:audio.bass,c:'#ff4466'},{v:audio.mid,c:'#44ff88'},{v:audio.treble,c:'#4488ff'}];
-      ctx.globalAlpha=.5;
-      levels.forEach((l,i)=>{
-        const x=mx+i*(bw+gap),h=Math.max(1,l.v*bh);
-        ctx.fillStyle='rgba(255,255,255,.1)';ctx.fillRect(x,my,bw,bh);// bg
-        ctx.fillStyle=l.c;ctx.fillRect(x,my+bh-h,bw,h);// level
-      });
-      ctx.globalAlpha=1;
-      ctx.fillStyle='rgba(255,255,255,.25)';ctx.font='7px Georgia';
-      ctx.fillText(this.mic.active?'MIC':'SIM',mx,my+bh+10);
-    }
+    // Full audio debug display at bottom
+    this.mic.drawDebug(ctx,W,H);
   }
 }
 
