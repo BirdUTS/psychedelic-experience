@@ -115,7 +115,7 @@ class ColorSystem{
   setScene(sc){this.sLo=sc.sLo;this.sHi=sc.sHi;this.lLo=sc.lLo;this.lHi=sc.lHi;this.bgH=sc.bgH;this.bgL=sc.bgL;this.speed=sc.speed;}
   update(dt,ts){this.hueBase+=(dt*8*(this.speed||1)+(ts?ts.hueShift*.002+ts.secondWave*.3:0));if(this.hueBase>360)this.hueBase-=360;}
   hsl(off=0,alpha=1){
-    const s=((this.sLo+this.sHi)/2*100)|0,l=((this.lLo+this.lHi)/2*100)|0;
+    const s=Math.min(100,((this.sLo+this.sHi)/2*100+5)|0),l=Math.min(80,((this.lLo+this.lHi)/2*100+5)|0);
     let h=(this.hueBase+off)%360;if(h<0)h+=360;
     return `hsla(${h|0},${s}%,${l}%,${alpha})`;
   }
@@ -426,30 +426,41 @@ class GeometryEngine{
     const r=sz*.25,cs=[{x:0,y:0}];
     for(let i=0;i<6;i++){const a=i*TAU/6;cs.push({x:Math.cos(a)*r,y:Math.sin(a)*r});}
     for(let i=0;i<6;i++){const a=i*TAU/6;cs.push({x:Math.cos(a)*r*2,y:Math.sin(a)*r*2});cs.push({x:Math.cos((i+.5)*TAU/6)*r*1.732,y:Math.sin((i+.5)*TAU/6)*r*1.732});}
-    ctx.lineWidth=2.5;
-    for(let i=0;i<cs.length;i++){const c=cs[i],bR=r*(1+.03*Math.sin(br.phase+i*.2));ctx.strokeStyle=co.hsl((i/cs.length)*120,.9);ctx.beginPath();ctx.arc(c.x,c.y,bR,0,TAU);ctx.stroke();}
+    for(let i=0;i<cs.length;i++){
+      const c=cs[i],bR=r*(1+.03*Math.sin(br.phase+i*.2));
+      // Solid fill with glow
+      const fillA=(.12+.08*Math.sin(br.phase+i*.3)).toFixed(2);
+      ctx.fillStyle=co.hsl((i/cs.length)*180,parseFloat(fillA));
+      ctx.beginPath();ctx.arc(c.x,c.y,bR,0,TAU);ctx.fill();
+      ctx.strokeStyle=co.hsl((i/cs.length)*180,.95);ctx.lineWidth=2.5;ctx.stroke();
+    }
   }
   _mc(ctx,sz,co,br){
     const r1=sz*.3,r2=sz*.55,ns=[{x:0,y:0}];
     for(let i=0;i<6;i++){const a=i*TAU/6+br.phase*.05;ns.push({x:Math.cos(a)*r1,y:Math.sin(a)*r1});}
     for(let i=0;i<6;i++){const a=(i+.5)*TAU/6+br.phase*.03;ns.push({x:Math.cos(a)*r2,y:Math.sin(a)*r2});}
-    ctx.lineWidth=.8;
-    for(let i=0;i<ns.length;i++)for(let j=i+1;j<ns.length;j++){const dx=ns[j].x-ns[i].x,dy=ns[j].y-ns[i].y,ang=Math.atan2(dy,dx),dist=Math.sqrt(dx*dx+dy*dy),al=.3+.3*Math.sin(br.phase+dist*.01);ctx.strokeStyle=co.hsl((ang/TAU)*360,Math.max(0,al));ctx.beginPath();ctx.moveTo(ns[i].x,ns[i].y);ctx.lineTo(ns[j].x,ns[j].y);ctx.stroke();}
-    for(let i=0;i<ns.length;i++){ctx.fillStyle=co.hsl((i/ns.length)*120,.9);ctx.beginPath();ctx.arc(ns[i].x,ns[i].y,4,0,TAU);ctx.fill();}
+    // Draw filled triangles between connected nodes
+    for(let i=1;i<7;i++){const j=(i%6)+1;
+      ctx.fillStyle=co.hsl(i*60,.12+.06*Math.sin(br.phase+i));
+      ctx.beginPath();ctx.moveTo(ns[0].x,ns[0].y);ctx.lineTo(ns[i].x,ns[i].y);ctx.lineTo(ns[j].x,ns[j].y);ctx.closePath();ctx.fill();
+    }
+    ctx.lineWidth=1.2;
+    for(let i=0;i<ns.length;i++)for(let j=i+1;j<ns.length;j++){const dx=ns[j].x-ns[i].x,dy=ns[j].y-ns[i].y,ang=Math.atan2(dy,dx),dist=Math.sqrt(dx*dx+dy*dy),al=.5+.3*Math.sin(br.phase+dist*.01);ctx.strokeStyle=co.hsl((ang/TAU)*360,Math.max(0,al));ctx.beginPath();ctx.moveTo(ns[i].x,ns[i].y);ctx.lineTo(ns[j].x,ns[j].y);ctx.stroke();}
+    for(let i=0;i<ns.length;i++){ctx.fillStyle=co.hsl((i/ns.length)*180,1);ctx.beginPath();ctx.arc(ns[i].x,ns[i].y,5+2*Math.sin(br.phase+i),0,TAU);ctx.fill();}
   }
   _sy(ctx,sz,co,br){
     const s=sz*.5;
     const U=[[[-0.8,.5],[.8,.5],[0,-.7]],[[-0.65,.35],[.65,.35],[0,-.55]],[[-0.5,.2],[.5,.2],[0,-.4]],[[-0.3,.08],[.3,.08],[0,-.22]]];
     const D=[[[-0.75,-.45],[.75,-.45],[0,.65]],[[-0.6,-.32],[.6,-.32],[0,.52]],[[-0.48,-.22],[.48,-.22],[0,.38]],[[-0.35,-.12],[.35,-.12],[0,.25]],[[-0.2,-.04],[.2,-.04],[0,.13]]];
-    const dt=(tris,hs)=>tris.forEach((tri,idx)=>{const ph=br.phase+idx*.5,bo=.01*Math.sin(ph);ctx.strokeStyle=co.hsl(hs+idx*25,.55+.2*Math.sin(ph));ctx.lineWidth=1.5;ctx.beginPath();ctx.moveTo(tri[0][0]*s*(1+bo),tri[0][1]*s*(1+bo));ctx.lineTo(tri[1][0]*s*(1+bo),tri[1][1]*s*(1+bo));ctx.lineTo(tri[2][0]*s*(1+bo),tri[2][1]*s*(1+bo));ctx.closePath();ctx.stroke();});
+    const dt=(tris,hs)=>tris.forEach((tri,idx)=>{const ph=br.phase+idx*.5,bo=.01*Math.sin(ph);ctx.fillStyle=co.hsl(hs+idx*25,.15+.1*Math.sin(ph));ctx.strokeStyle=co.hsl(hs+idx*25,.75+.2*Math.sin(ph));ctx.lineWidth=2;ctx.beginPath();ctx.moveTo(tri[0][0]*s*(1+bo),tri[0][1]*s*(1+bo));ctx.lineTo(tri[1][0]*s*(1+bo),tri[1][1]*s*(1+bo));ctx.lineTo(tri[2][0]*s*(1+bo),tri[2][1]*s*(1+bo));ctx.closePath();ctx.fill();ctx.stroke();});
     dt(U,0);dt(D,180);
     for(let i=0;i<3;i++){ctx.strokeStyle=co.hsl(i*40,.45+.2*Math.sin(br.phase+i));ctx.lineWidth=1.2;ctx.beginPath();ctx.arc(0,0,s*(.85+i*.06),0,TAU);ctx.stroke();}
   }
   _mandala(ctx,sz,co,br){
     const sym=12,layers=5;
     for(let l=0;l<layers;l++){
-      const r=sz*(.15+l*.15),al=.4+.2*Math.sin(br.phase+l*.8),dir=l%2?1:-1;
-      for(let i=0;i<sym;i++){const a=(i/sym)*TAU+br.phase*.1*dir,pR=r*.35*(1+.1*Math.sin(br.phase+i*.5));ctx.strokeStyle=co.hsl((i/sym)*60+l*30,al);ctx.fillStyle=co.hsl((i/sym)*60+l*30,al*.4);ctx.lineWidth=1.2;ctx.save();ctx.rotate(a);ctx.beginPath();ctx.ellipse(r,0,pR,pR*.4,0,0,TAU);ctx.stroke();ctx.fill();ctx.restore();}
+      const r=sz*(.15+l*.15),al=.6+.25*Math.sin(br.phase+l*.8),dir=l%2?1:-1;
+      for(let i=0;i<sym;i++){const a=(i/sym)*TAU+br.phase*.1*dir,pR=r*.35*(1+.1*Math.sin(br.phase+i*.5));ctx.fillStyle=co.hsl((i/sym)*60+l*30,al*.5);ctx.strokeStyle=co.hsl((i/sym)*60+l*30,al);ctx.lineWidth=1.8;ctx.save();ctx.rotate(a);ctx.beginPath();ctx.ellipse(r,0,pR,pR*.4,0,0,TAU);ctx.fill();ctx.stroke();ctx.restore();}
       ctx.strokeStyle=co.hsl(l*50,al*.5);ctx.lineWidth=.8;ctx.beginPath();ctx.arc(0,0,r,0,TAU);ctx.stroke();
     }
   }
@@ -525,42 +536,57 @@ class SpiritLights{
 // ═══════════════════════════════════════════
 class CollatzTree{
   constructor(){
-    this.maxN=100;this.targetN=300;this.seqs=[];this.growT=0;this.growSpeed=.3;
-    this.offC=document.createElement('canvas');this.offCtx=this.offC.getContext('2d');
+    this.maxN=80;this.targetN=250;this.seqs=[];this.growT=0;this.growSpeed=.4;
+    this.swayPhase=0;this.time=0;
     this._precompute();
   }
   _collatz(n){const seq=[n];while(n!==1&&seq.length<200){n=n%2===0?n/2:3*n+1;seq.push(n);}return seq.reverse();}
   _precompute(){this.seqs=[];for(let i=2;i<=this.maxN;i++)this.seqs.push(this._collatz(i));}
   update(dt,audio){
+    this.time+=dt;this.swayPhase+=dt*(.6+audio.mid*.8);
     this.growT+=dt*this.growSpeed*(1+audio.bass*.5);
-    if(this.maxN<this.targetN&&this.growT>this.seqs.length*.08){this.maxN=Math.min(this.targetN,this.maxN+5);this._precompute();}
+    if(this.maxN<this.targetN&&this.growT>this.seqs.length*.06){this.maxN=Math.min(this.targetN,this.maxN+5);this._precompute();}
   }
   draw(ctx,W,H,colors,audio){
-    if(this.offC.width!==W||this.offC.height!==H){this.offC.width=W;this.offC.height=H;}
-    const oc=this.offCtx;
-    oc.fillStyle='rgba(0,0,0,0.06)';oc.fillRect(0,0,W,H);
-    const cx=W/2,by=H*.88,segLen=Math.min(H,W)*.012,angleStep=8*Math.PI/180;
-    const maxVisible=Math.floor(this.growT*12);
-    const bassPulse=1+audio.bass*.6;
-    const{h:hueBase}=colors.hslValues();
+    const cx=W/2,by=H*.92,segLen=Math.min(H,W)*.018,angleStep=7*Math.PI/180;
+    const maxVisible=Math.floor(this.growT*15);
+    const bassPulse=1+audio.bass*.4;
+    ctx.save();ctx.globalCompositeOperation='screen';
     for(let si=0;si<this.seqs.length;si++){
       const seq=this.seqs[si];
-      let x=cx,y=by,angle=-Math.PI/2;
       const visCount=Math.min(seq.length,maxVisible-si*2);
-      if(visCount<2)continue;
+      if(visCount<3)continue;
+      // Draw as a single flowing path per sequence
+      ctx.beginPath();
+      let x=cx,y=by,angle=-Math.PI/2;
+      ctx.moveTo(x,y);
       for(let j=1;j<visCount;j++){
-        const val=seq[j],prevVal=seq[j-1];
-        angle+=(prevVal%2===0?-angleStep:angleStep);
-        const nx=x+Math.cos(angle)*segLen,ny=y+Math.sin(angle)*segLen;
-        const hue=(hueBase+val*7)%360;
-        oc.strokeStyle=`hsla(${hue|0},95%,65%,.4)`;oc.lineWidth=1.5;
-        oc.beginPath();oc.moveTo(x,y);oc.lineTo(nx,ny);oc.stroke();
-        const nodeSize=(2.5+audio.bass*3)*bassPulse*(j===visCount-1?2:1);
-        oc.fillStyle=`hsla(${hue|0},100%,72%,.6)`;oc.beginPath();oc.arc(nx,ny,nodeSize,0,TAU);oc.fill();
-        x=nx;y=ny;
+        const prevVal=seq[j-1];
+        const turn=prevVal%2===0?-angleStep:angleStep;
+        // Sway like seaweed — deeper = more sway
+        const sway=Math.sin(this.swayPhase+j*.15+si*.3)*.03*(j/visCount);
+        angle+=turn+sway;
+        const sl=segLen*bassPulse*(1+audio.bass*.2*Math.sin(this.time*3+j));
+        x+=Math.cos(angle)*sl;y+=Math.sin(angle)*sl;
+        ctx.lineTo(x,y);
+      }
+      // Color: depth-based gradient — purple trunk → red → orange → yellow → green tips
+      const depthRatio=Math.min(1,visCount/60);
+      const hue=(280+depthRatio*180)%360; // 280(purple) → 100(green)
+      const sat=95,lit=55+depthRatio*15;
+      const lw=Math.max(.8,3.5-depthRatio*2.5); // thick trunk, thin tips
+      ctx.strokeStyle=`hsla(${hue|0},${sat}%,${lit|0}%,${(.5+depthRatio*.4).toFixed(2)})`;
+      ctx.lineWidth=lw;ctx.lineJoin='round';ctx.lineCap='round';ctx.stroke();
+      // Bright tip glow on the longest branches
+      if(visCount>15&&depthRatio>.3){
+        const tipHue=(280+depthRatio*180)%360;
+        const g=ctx.createRadialGradient(x,y,0,x,y,4+audio.bass*6);
+        g.addColorStop(0,`hsla(${tipHue|0},100%,75%,.7)`);
+        g.addColorStop(1,`hsla(${tipHue|0},100%,60%,0)`);
+        ctx.fillStyle=g;ctx.beginPath();ctx.arc(x,y,4+audio.bass*6,0,TAU);ctx.fill();
       }
     }
-    ctx.save();ctx.globalCompositeOperation='screen';ctx.globalAlpha=.9;ctx.drawImage(this.offC,0,0);ctx.restore();
+    ctx.restore();
   }
 }
 
@@ -705,27 +731,27 @@ class JourneyCamera{
   }
   resize(W,H){this.W=W;this.H=H;}
   _newManeuver(){
-    // Pick a dramatic new viewing angle
+    // Aggressive dramatic viewing angle shifts
     const r=Math.random();
-    if(r<.2){// banking turn
-      this.targetRoll=(Math.random()-.5)*.5;this.targetPitch=(Math.random()-.5)*.15;this.targetYaw=(Math.random()-.5)*.3;this.targetZoom=1+Math.random()*.3;
-    }else if(r<.4){// dive/climb
-      this.targetRoll=(Math.random()-.5)*.15;this.targetPitch=(Math.random()-.5)*.4;this.targetYaw=(Math.random()-.5)*.1;this.targetZoom=.85+Math.random()*.3;
-    }else if(r<.55){// sweeping pan
-      this.targetRoll=(Math.random()-.5)*.1;this.targetPitch=(Math.random()-.5)*.1;this.targetYaw=(Math.random()-.5)*.5;this.targetZoom=1+Math.random()*.2;
-    }else if(r<.7){// zoom rush
-      this.targetRoll=0;this.targetPitch=0;this.targetYaw=0;this.targetZoom=1.3+Math.random()*.4;
-    }else if(r<.85){// spinning
-      this.targetRoll=(Math.random()-.5)*.8;this.targetPitch=(Math.random()-.5)*.2;this.targetYaw=(Math.random()-.5)*.2;this.targetZoom=1;
-    }else{// calm reset
-      this.targetRoll=0;this.targetPitch=0;this.targetYaw=0;this.targetZoom=1;
+    if(r<.2){// hard banking turn
+      this.targetRoll=(Math.random()-.5)*1.2;this.targetPitch=(Math.random()-.5)*.3;this.targetYaw=(Math.random()-.5)*.6;this.targetZoom=1.1+Math.random()*.4;
+    }else if(r<.4){// steep dive/climb
+      this.targetRoll=(Math.random()-.5)*.3;this.targetPitch=(Math.random()-.5)*.7;this.targetYaw=(Math.random()-.5)*.2;this.targetZoom=.7+Math.random()*.5;
+    }else if(r<.55){// aggressive pan
+      this.targetRoll=(Math.random()-.5)*.2;this.targetPitch=(Math.random()-.5)*.3;this.targetYaw=(Math.random()-.5)*.9;this.targetZoom=1+Math.random()*.3;
+    }else if(r<.7){// zoom rush — intense
+      this.targetRoll=(Math.random()-.5)*.15;this.targetPitch=(Math.random()-.5)*.15;this.targetYaw=0;this.targetZoom=1.6+Math.random()*.5;
+    }else if(r<.85){// barrel roll
+      this.targetRoll=(Math.random()-.5)*1.6;this.targetPitch=(Math.random()-.5)*.35;this.targetYaw=(Math.random()-.5)*.4;this.targetZoom=1.1;
+    }else{// brief calm before next storm
+      this.targetRoll=(Math.random()-.5)*.1;this.targetPitch=(Math.random()-.5)*.1;this.targetYaw=(Math.random()-.5)*.1;this.targetZoom=1;
     }
-    this.maneuverDur=6+Math.random()*14;
+    this.maneuverDur=3+Math.random()*8; // shorter, more frequent
   }
   update(dt,audio){
     if(!this.active)return;
-    const speedMod=50+100*(.5+audio.bass*.5);
-    this.speed=lerp(this.speed,speedMod,dt*.5);
+    const speedMod=80+180*(.5+audio.bass*.7);
+    this.speed=lerp(this.speed,speedMod,dt*.6);
     this.z+=this.speed*dt;
     // Smooth drift
     this.driftPhase+=dt*.5;this.rollPhase+=dt*.3;
@@ -734,10 +760,10 @@ class JourneyCamera{
     this.camY=Math.cos(this.driftPhase*.7)*100+Math.sin(this.driftPhase*.23)*60;
     // Maneuver transitions
     this.maneuverTimer+=dt;
-    if(this.maneuverTimer>=this.maneuverDur||(audio.bass>.7&&this.maneuverTimer>4)){
+    if(this.maneuverTimer>=this.maneuverDur||(audio.bass>.55&&this.maneuverTimer>2.5)){
       this.maneuverTimer=0;this._newManeuver();
     }
-    const lerpRate=dt*.4;
+    const lerpRate=dt*.7;
     // Organic oscillation layered on top of maneuver targets
     const oscRoll=Math.sin(this.rollPhase)*.06+Math.sin(this.rollPhase*2.3)*.03;
     const oscPitch=Math.sin(this.pitchPhase)*.05+Math.sin(this.pitchPhase*1.7)*.03;
@@ -774,23 +800,59 @@ class JourneyCamera{
 // SOUND ENGINE
 // ═══════════════════════════════════════════
 class SoundEngine{
-  constructor(){this.ctx=null;this.ok=false;this.droneOscs=[];this.droneGain=null;this.droneFilter=null;this.moveOsc=null;this.moveGain=null;this.holdOsc=null;this.holdGain=null;this.reverb=null;this.master=null;}
+  constructor(){
+    this.ctx=null;this.ok=false;this.droneOscs=[];this.droneGain=null;this.droneFilter=null;
+    this.moveOsc=null;this.moveGain=null;this.holdOsc=null;this.holdGain=null;
+    this.reverb=null;this.master=null;
+    // Ambient responsive system
+    this.ambOscs=[];this.ambGains=[];this.ambFilter=null;this.ambMaster=null;
+    this.whisperTimer=0;this.pingTimer=0;this.lastVolume=0;this.quietDur=0;
+  }
   init(){
     if(this.ok)return;
     this.ctx=new(window.AudioContext||window.webkitAudioContext)();this.ok=true;
     this.master=this.ctx.createGain();this.master.gain.value=.5;this.master.connect(this.ctx.destination);
-    this.reverb=this._mkRev(3);this.reverb.connect(this.master);
+    this.reverb=this._mkRev(3.5);this.reverb.connect(this.master);
+    // Drone layer
     this.droneFilter=this.ctx.createBiquadFilter();this.droneFilter.type='lowpass';this.droneFilter.frequency.value=800;this.droneFilter.connect(this.reverb);
     this.droneGain=this.ctx.createGain();this.droneGain.gain.value=.07;this.droneGain.connect(this.droneFilter);
     [[110,0],[165,-3],[220,5]].forEach(([f,det])=>{const o=this.ctx.createOscillator();o.type='sine';o.frequency.value=f;o.detune.value=det;o.connect(this.droneGain);o.start();this.droneOscs.push(o);});
+    // Move layer
     this.moveGain=this.ctx.createGain();this.moveGain.gain.value=0;const mf=this.ctx.createBiquadFilter();mf.type='bandpass';mf.frequency.value=600;mf.Q.value=2;this.moveGain.connect(mf);mf.connect(this.reverb);
     this.moveOsc=this.ctx.createOscillator();this.moveOsc.type='triangle';this.moveOsc.frequency.value=440;this.moveOsc.connect(this.moveGain);this.moveOsc.start();
+    // Hold layer
     this.holdGain=this.ctx.createGain();this.holdGain.gain.value=0;this.holdGain.connect(this.reverb);
     this.holdOsc=this.ctx.createOscillator();this.holdOsc.type='sine';this.holdOsc.frequency.value=220;this.holdOsc.connect(this.holdGain);this.holdOsc.start();
+    // === Ambient responsive layer — ethereal mechanical voices ===
+    this.ambFilter=this.ctx.createBiquadFilter();this.ambFilter.type='bandpass';this.ambFilter.frequency.value=1200;this.ambFilter.Q.value=4;this.ambFilter.connect(this.reverb);
+    this.ambMaster=this.ctx.createGain();this.ambMaster.gain.value=0;this.ambMaster.connect(this.ambFilter);
+    // 3 detuned whisper oscillators (different waveforms for mechanical/organic blend)
+    ['sine','triangle','sawtooth'].forEach((type,i)=>{
+      const o=this.ctx.createOscillator(),g=this.ctx.createGain();
+      o.type=type;o.frequency.value=440+i*220;o.detune.value=(i-1)*7;
+      g.gain.value=0;o.connect(g);g.connect(this.ambMaster);o.start();
+      this.ambOscs.push(o);this.ambGains.push(g);
+    });
   }
   _mkRev(dur){const r=this.ctx.sampleRate,len=r*dur,buf=this.ctx.createBuffer(2,len,r);for(let c=0;c<2;c++){const d=buf.getChannelData(c);for(let i=0;i<len;i++)d[i]=(Math.random()*2-1)*Math.pow(1-i/len,2.5);}const cv=this.ctx.createConvolver();cv.buffer=buf;return cv;}
   _q(freq){const C4=261.63,st=12*Math.log2(freq/C4),oct=Math.floor(st/12);let rem=((st%12)+12)%12,mn=99,sn=0;for(const d of PENTATONIC){const dd=Math.min(Math.abs(rem-d),12-Math.abs(rem-d));if(dd<mn){mn=dd;sn=d;}}return C4*Math.pow(2,(oct*12+sn)/12);}
   _set(p,v,tc=.1){try{if(isFinite(v))p.setTargetAtTime(v,this.ctx.currentTime,tc);}catch(e){}}
+  // Metallic ping — short filtered noise burst
+  _ping(freq,vol){
+    if(!this.ok)return;const now=this.ctx.currentTime;
+    const o=this.ctx.createOscillator(),g=this.ctx.createGain(),f=this.ctx.createBiquadFilter();
+    o.type='sine';o.frequency.value=this._q(freq);
+    f.type='bandpass';f.frequency.value=this._q(freq)*2;f.Q.value=12;
+    g.gain.setValueAtTime(vol,now);g.gain.exponentialRampToValueAtTime(.001,now+1.5);
+    o.connect(f);f.connect(g);g.connect(this.reverb);o.start(now);o.stop(now+1.5);
+    // Add a tiny metallic click
+    const nb=this.ctx.createBuffer(1,this.ctx.sampleRate*.03,this.ctx.sampleRate),nd=nb.getChannelData(0);
+    for(let i=0;i<nd.length;i++)nd[i]=(Math.random()*2-1)*Math.pow(1-i/nd.length,3);
+    const ns=this.ctx.createBufferSource(),ng=this.ctx.createGain(),nf=this.ctx.createBiquadFilter();
+    nf.type='bandpass';nf.frequency.value=this._q(freq)*4;nf.Q.value=20;
+    ng.gain.setValueAtTime(vol*.3,now);ng.gain.exponentialRampToValueAtTime(.001,now+.08);
+    ns.buffer=nb;ns.connect(nf);nf.connect(ng);ng.connect(this.reverb);ns.start(now);ns.stop(now+.1);
+  }
   updateMove(nx,ny,vel){if(!this.ok)return;this._set(this.moveOsc.frequency,this._q(220+nx*660),.05);this._set(this.moveGain.gain,Math.min(.12,vel*.0008),.02);this._set(this.droneFilter.frequency,200+(1-ny)*1800,.1);}
   fadeMove(){if(this.ok)this._set(this.moveGain.gain,0,.3);}
   triggerClick(nx,ny){
@@ -802,6 +864,57 @@ class SoundEngine{
   startHold(){if(this.ok)this._set(this.holdGain.gain,.08,.3);}
   updateHold(dur){if(this.ok)this._set(this.holdOsc.frequency,this._q(220+Math.min(dur*30,440)),.1);}
   releaseHold(){if(this.ok)this._set(this.holdGain.gain,0,.5);}
+  // === Main ambient update — called every frame with audio data ===
+  updateAmbient(t,audio){
+    if(!this.ok)return;
+    const vol=audio.volume,bass=audio.bass,mid=audio.mid,treble=audio.treble;
+    const isQuiet=vol<.25;
+    const isLoud=vol>.45;
+    if(isQuiet)this.quietDur+=.016;else this.quietDur=0;
+    // --- LOUD mode: drone follows environment, simplify to single tone ---
+    if(isLoud){
+      this._set(this.droneGain.gain,.04,.3); // softer drone when loud
+      this._set(this.ambMaster.gain,0,.2); // silence ambient whispers
+      // Drone filter opens with bass
+      this._set(this.droneFilter.frequency,300+bass*2000,.05);
+      this.lastVolume=vol;return;
+    }
+    // --- QUIET mode: ethereal mechanical communication ---
+    this._set(this.droneGain.gain,.09+this.quietDur*.003,.5); // drone grows slightly
+    this._set(this.droneFilter.frequency,400+mid*1200+Math.sin(t*.7)*300,.1);
+    // Whisper oscillators — respond to micro-sounds in environment
+    const sensitivity=isQuiet?3:1;
+    const micDelta=Math.abs(vol-this.lastVolume)*sensitivity;
+    this.lastVolume=vol;
+    // Ambient whisper layer — swells and ebbs
+    const whisperVol=isQuiet?(.02+.04*Math.sin(t*.3)+micDelta*.5):.01;
+    this._set(this.ambMaster.gain,Math.min(.08,whisperVol),.1);
+    // Modulate whisper frequencies based on environment
+    const baseF=this._q(330+mid*440+treble*220);
+    this.ambOscs[0].frequency.setTargetAtTime(baseF,this.ctx.currentTime,.2);
+    this.ambOscs[1].frequency.setTargetAtTime(baseF*1.5,this.ctx.currentTime,.3);
+    this.ambOscs[2].frequency.setTargetAtTime(baseF*.75,this.ctx.currentTime,.4);
+    this._set(this.ambFilter.frequency,800+treble*4000+Math.sin(t*1.3)*600,.08);
+    this._set(this.ambFilter.Q,2+mid*8,.15);
+    // Metallic ping responses to sudden sounds
+    this.pingTimer-=.016;
+    if(micDelta>.015&&this.pingTimer<=0){
+      this._ping(440+mid*880+treble*440,Math.min(.06,micDelta*2));
+      this.pingTimer=.3+Math.random()*.5; // cooldown
+    }
+    // Occasional ethereal whisper sweep (when very quiet for a while)
+    this.whisperTimer-=.016;
+    if(this.quietDur>3&&this.whisperTimer<=0){
+      this.whisperTimer=4+Math.random()*6;
+      const now=this.ctx.currentTime;
+      const o=this.ctx.createOscillator(),g=this.ctx.createGain(),f=this.ctx.createBiquadFilter();
+      o.type='sine';const wFreq=this._q(220+Math.random()*660);
+      o.frequency.setValueAtTime(wFreq,now);o.frequency.exponentialRampToValueAtTime(wFreq*(1.2+Math.random()*.6),now+3);
+      f.type='bandpass';f.frequency.value=wFreq*2;f.Q.value=6;
+      g.gain.setValueAtTime(0,now);g.gain.linearRampToValueAtTime(.04,now+.8);g.gain.linearRampToValueAtTime(0,now+3);
+      o.connect(f);f.connect(g);g.connect(this.reverb);o.start(now);o.stop(now+3.5);
+    }
+  }
   updateDrone(t){
     if(!this.ok||!isFinite(t))return;
     try{const roots=[110,123.47,130.81,164.81,185],idx=Math.floor(t/45)%roots.length,freq=roots[idx]+(roots[(idx+1)%roots.length]-roots[idx])*((t%45)/45);if(!isFinite(freq))return;const now=this.ctx.currentTime;this.droneOscs[0].frequency.setTargetAtTime(freq,now,2);this.droneOscs[1].frequency.setTargetAtTime(freq*1.5,now,2);this.droneOscs[2].frequency.setTargetAtTime(freq*2,now,2);}catch(e){}
@@ -1061,7 +1174,7 @@ class App{
       if(this._layerActive('tunnel'))this.tunnel.update(dt,audio,this.breath,this.timeSys);
       if(this._layerActive('collatz'))this.collatz.update(dt,audio);
       if(this._layerActive('gol'))this.gol.update(dt,audio);
-      this.spirits.update(dt);this.sound.updateDrone(this.time);
+      this.spirits.update(dt);this.sound.updateDrone(this.time);this.sound.updateAmbient(this.time,audio);
 
       if(this.vel>.5){
         this.trail.push(this.mx,this.my);
