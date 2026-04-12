@@ -50,7 +50,7 @@ canvas{display:block;width:100vw;height:100vh;cursor:none;}
       <div class="mode-label"><div class="zh">Journey</div><div class="en">drift through worlds</div></div>
     </div>
   </div>
-  <button id="mic-btn">🎤 Enable Microphone</button>
+  <button id="mic-btn" class="active">🎤 Microphone On</button>
 </div>
 <canvas id="c"></canvas>
 <div id="hud">
@@ -65,9 +65,10 @@ canvas{display:block;width:100vw;height:100vh;cursor:none;}
   <button class="hud-btn on" data-layer="gol">Life</button>
 </div>
 <div id="controls">
-  <button class="ctrl-btn" id="btn-mic" title="Microphone">🎤</button>
+  <button class="ctrl-btn active" id="btn-mic" title="Microphone">🎤</button>
   <button class="ctrl-btn" id="btn-mute" title="Mute Sound">🔊</button>
   <button class="ctrl-btn" id="btn-fs" title="Fullscreen">⛶</button>
+  <button class="ctrl-btn" id="btn-home" title="Home">↩</button>
 </div>
 <div id="phase-label"></div>
 <script>
@@ -1065,7 +1066,7 @@ class App{
     this.director=new SceneDirector();
     this.camera=null;
     this.modeSelect=new ModeSelectScreen();
-    this.ambientSpawned=false;this.micEnabled=false;
+    this.ambientSpawned=false;this.micEnabled=true;
     this.lastSceneName='';this.entryTime=0;
     this._setupHud();this._setupEvents();this.resize();
     window.addEventListener('resize',()=>this.resize());
@@ -1093,7 +1094,7 @@ class App{
       e.stopPropagation();this.micEnabled=!this.micEnabled;
       const btn=document.getElementById('mic-btn');
       btn.classList.toggle('active',this.micEnabled);
-      btn.textContent=this.micEnabled?'🎤 Microphone On':'🎤 Enable Microphone';
+      btn.textContent=this.micEnabled?'🎤 Microphone On':'🎤 Microphone Off';
     });
     // In-experience control buttons
     document.getElementById('btn-mic').addEventListener('click',e=>{
@@ -1115,6 +1116,9 @@ class App{
       }else{
         (document.exitFullscreen||document.webkitExitFullscreen||document.msExitFullscreen||function(){}).call(document);
       }
+    });
+    document.getElementById('btn-home').addEventListener('click',e=>{
+      e.stopPropagation();this._goHome();
     });
     // Mode selection panels
     document.getElementById('panel-stationary').addEventListener('click',e=>{e.stopPropagation();this._startExperience(false);});
@@ -1138,14 +1142,14 @@ class App{
     window.addEventListener('touchend',()=>{if(this.down&&this.holdDur>.3)this._onRelease();this.down=false;this.holdDur=0;this.sound.releaseHold();});
     let hudTimer=null;const ctrlEl=document.getElementById('controls');
     window.addEventListener('mousemove',()=>{
-      if(!this.modeSelect.isDone)return;
+      if(!this.started||!this.modeSelect.isDone)return;
       if(performance.now()/1000-this.entryTime<2)return;
       this.hud.classList.add('visible');ctrlEl.classList.add('visible');clearTimeout(hudTimer);
       hudTimer=setTimeout(()=>{this.hud.classList.remove('visible');ctrlEl.classList.remove('visible');},4000);
     });
     // Touch: show controls on tap
     window.addEventListener('touchstart',()=>{
-      if(!this.modeSelect.isDone)return;
+      if(!this.started||!this.modeSelect.isDone)return;
       ctrlEl.classList.add('visible');this.hud.classList.add('visible');clearTimeout(hudTimer);
       hudTimer=setTimeout(()=>{this.hud.classList.remove('visible');ctrlEl.classList.remove('visible');},4000);
     },{passive:true});
@@ -1156,12 +1160,47 @@ class App{
     this.modeSelect.select(isJourney?'journey':'stationary');
     this.entry.classList.add('hidden');
     this.sound.init();
-    if(this.micEnabled)this.mic.init(this.sound.audioCtx);
+    // Restore sound volume (may have been faded by _goHome)
+    if(this.sound.ok&&!this.muted){
+      this.sound.master.gain.setTargetAtTime(.5,this.sound.ctx.currentTime,.1);
+      this.sound.droneGain.gain.setTargetAtTime(.07,this.sound.ctx.currentTime,.1);
+    }
+    if(this.sound.ok&&this.sound.ctx.state==='suspended')this.sound.ctx.resume();
+    if(this.micEnabled&&!this.mic.active)this.mic.init(this.sound.audioCtx);
     if(isJourney){this.camera=new JourneyCamera(this.W,this.H);this.camera.active=true;}
     this.started=true;this.lastTime=performance.now()/1000;this.entryTime=this.lastTime;
     this.mx=this.W/2;this.my=this.H/2;
     this.fourier.setSym(8);
-    requestAnimationFrame(t=>this._loop(t));
+    // Auto-fullscreen on mobile
+    const isMobile=/Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent);
+    if(isMobile){
+      const el=document.documentElement;
+      (el.requestFullscreen||el.webkitRequestFullscreen||el.msRequestFullscreen||function(){}).call(el);
+    }
+    if(!this._looping){this._looping=true;requestAnimationFrame(t=>this._loop(t));}
+  }
+
+  _goHome(){
+    // Return to entry screen
+    this.started=false;
+    this.entry.classList.remove('hidden');
+    this.modeSelect.isDone=false;
+    // Stop sound gracefully
+    if(this.sound.ok){
+      this.sound.master.gain.setTargetAtTime(0,this.sound.ctx.currentTime,.3);
+      this.sound.droneGain.gain.setTargetAtTime(0,this.sound.ctx.currentTime,.3);
+      if(this.sound.ambMaster)this.sound.ambMaster.gain.setTargetAtTime(0,this.sound.ctx.currentTime,.3);
+    }
+    // Hide controls immediately and prevent re-show
+    const ctrlEl=document.getElementById('controls');
+    ctrlEl.classList.remove('visible');
+    this.hud.classList.remove('visible');
+    // Force hide with slight delay to override any pending touchstart show
+    setTimeout(()=>{ctrlEl.classList.remove('visible');this.hud.classList.remove('visible');},50);
+    // Exit fullscreen
+    if(document.fullscreenElement||document.webkitFullscreenElement){
+      (document.exitFullscreen||document.webkitExitFullscreen||document.msExitFullscreen||function(){}).call(document);
+    }
   }
 
   _onClick(x,y){
