@@ -930,12 +930,29 @@ class App{
     // Spirit lights
     this.spirits.draw(ctx);
 
-    // Flash
-    if(this.flashA>.005){ctx.save();ctx.globalCompositeOperation='screen';ctx.fillStyle=`hsla(${this.colors.hslValues().h|0},60%,80%,${this.flashA.toFixed(3)})`;ctx.fillRect(0,0,W,H);ctx.restore();}
+    // Flash (click + audio bass pulse)
+    const bassPulseA=Math.max(0,audio.bass-.5)*.35;// visible above .5 threshold
+    const totalFlash=Math.max(this.flashA,bassPulseA);
+    if(totalFlash>.005){ctx.save();ctx.globalCompositeOperation='screen';ctx.fillStyle=`hsla(${this.colors.hslValues().h|0},60%,80%,${totalFlash.toFixed(3)})`;ctx.fillRect(0,0,W,H);ctx.restore();}
 
     // Vignette
     const vig=ctx.createRadialGradient(W/2,H/2,Math.min(W,H)*.3,W/2,H/2,Math.max(W,H)*.75);
     vig.addColorStop(0,'rgba(0,0,0,0)');vig.addColorStop(1,'rgba(0,0,0,.5)');ctx.fillStyle=vig;ctx.fillRect(0,0,W,H);
+
+    // Audio meter (small bars in bottom-right, shows bass/mid/treble levels)
+    if(this.mic.active||true){// always show — so user can see fallback vs real mic
+      const mx=W-60,my=H-50,bw=10,bh=30,gap=5;
+      const levels=[{v:audio.bass,c:'#ff4466'},{v:audio.mid,c:'#44ff88'},{v:audio.treble,c:'#4488ff'}];
+      ctx.globalAlpha=.5;
+      levels.forEach((l,i)=>{
+        const x=mx+i*(bw+gap),h=Math.max(1,l.v*bh);
+        ctx.fillStyle='rgba(255,255,255,.1)';ctx.fillRect(x,my,bw,bh);// bg
+        ctx.fillStyle=l.c;ctx.fillRect(x,my+bh-h,bw,h);// level
+      });
+      ctx.globalAlpha=1;
+      ctx.fillStyle='rgba(255,255,255,.25)';ctx.font='7px Georgia';
+      ctx.fillText(this.mic.active?'MIC':'SIM',mx,my+bh+10);
+    }
   }
 }
 
