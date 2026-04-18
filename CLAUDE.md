@@ -53,6 +53,28 @@ Two entry modes chosen on the splash screen (`ModeSelectScreen`):
 - **Every new `SCENES` entry** must set a weight (including 0) for every known layer, because `_applyScene` zeroes known layers then copies the scene's entries over — a missing key silently keeps the previous weight.
 - Journey-mode code paths and stationary paths diverge at `const cam = this.camera && this.camera.active ? this.camera : null;` in `_renderMain`. When touching rendering, think through both.
 
+## Product direction
+
+This file started as a single-screen generative audio visualizer. The product is evolving into an **interpretation engine** — one that wears an artistic taste (vibrant HSL, additive blending, breathing scenes, director-driven crossfades) and applies it to any input signal, eventually serving as a benchmarking platform for different AI models' grasp of human aesthetic taste.
+
+### Roadmap (keep in order; each phase gates the next)
+
+1. **Audio source abstraction + demo tracks** — introduce an `AudioSource` wrapper so the `AnalyserNode` pipeline can be fed by mic, bundled CC0 tracks, or a user-chosen local file. Downstream visualizers don't change. Ship both a curated bundle *and* a file picker.
+2. **Visual input — driver mode only** — add a `VisualAnalyser` that emits the same shape as `MicrophoneSystem` (`bass`/`mid`/`treble`/`volume` + optical-flow field) from an uploaded photo or video. Visualizers consume it unchanged. Subject-mode effects (photo dissolution, kaleido echo, flow-field particles) are explicitly out of scope for this phase.
+3. **Multi-phone mirror mode** — room code + small backend (Cloudflare Worker + KV on free tier) relaying `{sceneIndex, sceneTimer, audioBuckets, cameraState, seed}` over WebSocket. Every phone renders deterministically from the broadcast state. ~1 KB/s bandwidth. Tiled mosaic is future work, not this phase.
+4. **Visualization contract (lightweight refactor)** — wrap the current `App` as a first implementation of an interface: `{meta, init(ctx, w, h), update(signals, dt), draw(ctx, w, h)}`. Keep everything in `index.html`. This is purely preparatory for Phase 5.
+5. **Benchmarking gallery v0** — load multiple `Visualization` submissions in sandboxed `<iframe>`s against a shared reference source, A/B vote UI, store votes in localStorage first and sync to the Worker + KV. ELO per model per category per reference track. Audio submissions and visual-input submissions are **separate categories** — don't unify into a multi-modal score.
+6. **Tiled mosaic** (long-term) — many phones → one larger canvas. Alignment UX is the hard part; defer until the platform has real use.
+
+### Standing constraints
+
+- **Single file for as long as possible.** Keep everything in `index.html`. Only break into ES modules when truly forced to. Double-click-to-run is part of the product.
+- **All user media stays client-side.** Mic, chosen audio files, uploaded photos/videos — none of it uploads. The backend (Phase 3+) only sees room sync state and votes. Never media.
+- **No webcam for now.** Photo/video file input only in Phase 2. Webcam re-introduces permission prompts we're trying to move away from.
+- **Driver mode only for visual input.** Subject-mode scenes are future work and must not land until explicitly scoped.
+- **Backend is optional at runtime.** The app must keep working fully offline / fully static when the Worker is unreachable; multiplayer and voting degrade to single-device gracefully.
+- **Benchmark categories stay separate.** Audio-driven submissions and visual-input-driven submissions are rated in parallel tracks, not a combined leaderboard.
+
 ## Git workflow
 
 Development branch for this task is `claude/add-claude-documentation-0K2ON`. Commit there, push with `-u origin <branch>`, don't open PRs unless asked.
