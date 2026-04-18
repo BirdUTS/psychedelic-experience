@@ -280,9 +280,28 @@ class TimeSystem{
 // COLOR SYSTEM — EXTREMELY VIBRANT
 // ═══════════════════════════════════════════
 class ColorSystem{
-  constructor(){this.hueBase=Math.random()*360;this.sLo=.9;this.sHi=1;this.lLo=.55;this.lHi=.72;this.bgH=260;this.bgL=12;this.speed=1;}
+  constructor(){this.hueBase=Math.random()*360;this.sLo=.9;this.sHi=1;this.lLo=.55;this.lHi=.72;this.bgH=260;this.bgL=12;this.speed=1;this._palette=null;}
   setScene(sc){this.sLo=sc.sLo;this.sHi=sc.sHi;this.lLo=sc.lLo;this.lHi=sc.lHi;this.bgH=sc.bgH;this.bgL=sc.bgL;this.speed=sc.speed;}
   update(dt,ts){this.hueBase+=(dt*8*(this.speed||1)+(ts?ts.hueShift*.002+ts.secondWave*.3:0));if(this.hueBase>360)this.hueBase-=360;}
+  // Photo-driver override: pulls hue/sat/lightness from an extracted palette.
+  // Cycles through palette entries slowly so the scene drifts through the photo's colors.
+  applyPalette(palette,t){
+    if(!palette||!palette.length)return;
+    const cycle=8,n=palette.length;
+    const idx=((t/cycle)%n+n)%n;
+    const a=idx|0,b=(a+1)%n,f=idx-a;
+    let h1=palette[a].h,h2=palette[b].h;
+    if(Math.abs(h2-h1)>180)h2+=h2<h1?360:-360;
+    const h=(h1+(h2-h1)*f+360)%360;
+    const s=palette[a].s+(palette[b].s-palette[a].s)*f;
+    const l=palette[a].l+(palette[b].l-palette[a].l)*f;
+    this.hueBase=h;
+    this.sLo=Math.max(.25,Math.min(1,s-.1));
+    this.sHi=Math.max(.35,Math.min(1,s+.12));
+    this.lLo=Math.max(.2,Math.min(.75,l-.08));
+    this.lHi=Math.max(.3,Math.min(.85,l+.12));
+    this.bgH=palette[0].h;
+  }
   hsl(off=0,alpha=1){
     const s=Math.min(100,((this.sLo+this.sHi)/2*100+5)|0),l=Math.min(80,((this.lLo+this.lHi)/2*100+5)|0);
     let h=(this.hueBase+off)%360;if(h<0)h+=360;
@@ -349,6 +368,8 @@ class VisualAnalyser{
     this._cv=document.createElement('canvas');this._cv.width=64;this._cv.height=64;
     this._cx=this._cv.getContext('2d',{willReadFrequently:true});
     this._el=null;this._url=null;this._prev=null;this._t=0;
+    // Photo-only preprocessed artifacts (for subject-mode "ghost of the photo")
+    this.palette=null;this.edgePoints=null;this.edgeW=0;this.edgeH=0;this.aspect=1;
   }
   async init(kind,file){
     this.teardown();
@@ -362,6 +383,7 @@ class VisualAnalyser{
         this.kind='photo';
         this.name=(file.name||'Photo').replace(/\.[^.]+$/,'').slice(0,28);
         this.hint='A still image — its palette and texture breathe through the scene.';
+        this._preprocessPhoto();
       }else if(kind==='video'){
         const vid=document.createElement('video');
         vid.src=this._url;vid.loop=true;vid.muted=true;vid.playsInline=true;
@@ -447,11 +469,84 @@ class VisualAnalyser{
     this.treble=lerp(Math.min(1,edge*3.6),this.treble,S);
     this.flowX=fx;this.flowY=fy;
   }
+  // One-time photo preprocess: extract dominant palette + Sobel edge points
+  // for the subject-mode "ghost of the photo" layer. Photos only — videos skip this.
+  _preprocessPhoto(){
+    const PW=128,PH=128;
+    const cv=document.createElement('canvas');cv.width=PW;cv.height=PH;
+    const cx=cv.getContext('2d',{willReadFrequently:true});
+    const iw=this._el.naturalWidth||this._el.width||PW;
+    const ih=this._el.naturalHeight||this._el.height||PH;
+    this.aspect=iw/ih;
+    const scale=Math.min(PW/iw,PH/ih);
+    const dw=iw*scale,dh=ih*scale;
+    cx.fillStyle='#000';cx.fillRect(0,0,PW,PH);
+    cx.drawImage(this._el,(PW-dw)/2,(PH-dh)/2,dw,dh);
+    let data;try{data=cx.getImageData(0,0,PW,PH).data;}catch(e){return;}
+    // --- Palette: 24-bin hue histogram of saturated pixels ---
+    const B=24,bins=new Float32Array(B),binS=new Float32Array(B),binL=new Float32Array(B);
+    for(let i=0;i<data.length;i+=4){
+      const r=data[i]/255,g=data[i+1]/255,b=data[i+2]/255;
+      const mx=Math.max(r,g,b),mn=Math.min(r,g,b),d=mx-mn;
+      const l=(mx+mn)/2;
+      if(d<.08)continue;
+      const s=l>.5?d/(2-mx-mn):d/(mx+mn);
+      if(s<.18)continue;
+      let h;
+      if(mx===r)h=(g-b)/d+(g<b?6:0);
+      else if(mx===g)h=(b-r)/d+2;
+      else h=(r-g)/d+4;
+      h=(h*60+360)%360;
+      const bi=Math.min(B-1,(h/360*B)|0);
+      bins[bi]++;binS[bi]+=s;binL[bi]+=l;
+    }
+    const order=[...bins.keys()].sort((a,b)=>bins[b]-bins[a]);
+    const palette=[];
+    for(const bi of order){
+      if(bins[bi]<20)break;
+      palette.push({h:bi*(360/B)+180/B,s:binS[bi]/bins[bi],l:binL[bi]/bins[bi]});
+      if(palette.length>=6)break;
+    }
+    if(!palette.length){palette.push({h:Math.random()*360,s:.3,l:.5});}
+    this.palette=palette;
+    // --- Edge field via Sobel on luminance ---
+    const gray=new Float32Array(PW*PH);
+    for(let i=0,j=0;i<data.length;i+=4,j++){
+      gray[j]=(data[i]*.3+data[i+1]*.59+data[i+2]*.11)/255;
+    }
+    const pts=[];let maxE=0;
+    const mags=new Float32Array(PW*PH);
+    for(let y=1;y<PH-1;y++){
+      for(let x=1;x<PW-1;x++){
+        const i=y*PW+x;
+        const gx=-gray[i-PW-1]-2*gray[i-1]-gray[i+PW-1]
+                 +gray[i-PW+1]+2*gray[i+1]+gray[i+PW+1];
+        const gy=-gray[i-PW-1]-2*gray[i-PW]-gray[i-PW+1]
+                 +gray[i+PW-1]+2*gray[i+PW]+gray[i+PW+1];
+        const m=Math.sqrt(gx*gx+gy*gy);
+        mags[i]=m;if(m>maxE)maxE=m;
+      }
+    }
+    if(maxE>0){
+      const thresh=maxE*.22;
+      for(let i=0;i<mags.length;i++){
+        if(mags[i]>thresh){
+          const n=mags[i]/maxE;
+          pts.push([i%PW,(i/PW)|0,n]);
+        }
+      }
+    }
+    // Keep the strongest ~700 points so ghost stays sparse
+    pts.sort((a,b)=>b[2]-a[2]);
+    this.edgePoints=pts.slice(0,700);
+    this.edgeW=PW;this.edgeH=PH;
+  }
   teardown(){
     if(this._el&&this._el.pause){try{this._el.pause();}catch(e){}}
     if(this._url){URL.revokeObjectURL(this._url);this._url=null;}
     this._el=null;this._prev=null;
     this.active=false;this.kind=null;this.name='';this.hint='';
+    this.palette=null;this.edgePoints=null;this.edgeW=0;this.edgeH=0;this.aspect=1;
     this.bass=this.mid=this.treble=this.volume=0;
   }
 }
@@ -2232,6 +2327,10 @@ class App{
       this._respawnJourneyParticles();
       this.director.update(dt,audio,this.colors);
       this.colors.update(dt,this.timeSys);
+      // Subject-mode: when a photo drives the piece, bias the palette toward the photo's colors.
+      if(this.visual.active&&this.visual.kind==='photo'&&this.visual.palette){
+        this.colors.applyPalette(this.visual.palette,this.time);
+      }
 
       // Show scene name on transitions
       const sn=this.director.sceneName();
@@ -2340,10 +2439,44 @@ class App{
     const totalFlash=Math.min(.25,Math.max(this.flashA*.7,bassPulseA));
     if(totalFlash>.005){ctx.save();ctx.globalCompositeOperation='screen';ctx.fillStyle=`hsla(${this.colors.hslValues().h|0},85%,55%,${totalFlash.toFixed(3)})`;ctx.fillRect(0,0,W,H);ctx.restore();}
 
+    // Photo-driver "ghost" — additive scatter of edge points, breathing in and out.
+    this._drawVisualGhost(ctx,W,H,audio);
+
     // Vignette — reduced alpha for vibrancy
     const vig=ctx.createRadialGradient(W/2,H/2,Math.min(W,H)*.35,W/2,H/2,Math.max(W,H)*.8);
     vig.addColorStop(0,'rgba(0,0,0,0)');vig.addColorStop(1,'rgba(0,0,0,.15)');ctx.fillStyle=vig;ctx.fillRect(0,0,W,H);
 
+  }
+
+  _drawVisualGhost(ctx,W,H,audio){
+    const v=this.visual;
+    if(!v.active||v.kind!=='photo'||!v.edgePoints||!v.edgePoints.length)return;
+    // Fit photo aspect ratio into viewport, center
+    const ar=v.aspect||1,vpAR=W/H;
+    let sw,sh,offX,offY;
+    if(ar>vpAR){sw=W*.88;sh=sw/ar;}else{sh=H*.88;sw=sh*ar;}
+    offX=(W-sw)/2;offY=(H-sh)/2;
+    // Breathing opacity: long sinusoid cycle so it fades in and out instead of always-on
+    const cycle=.35+.32*Math.sin(this.time*.38);
+    const base=Math.max(0,cycle)*.55;
+    if(base<.015)return;
+    // Small drift so points aren't frozen
+    const drX=Math.sin(this.time*.27)*6,drY=Math.cos(this.time*.22)*6;
+    const pulse=1+audio.bass*.5;
+    const hue=this.colors.hueBase;
+    const pts=v.edgePoints,PW=v.edgeW,PH=v.edgeH;
+    ctx.save();ctx.globalCompositeOperation='screen';
+    for(let k=0;k<pts.length;k+=2){
+      const p=pts[k];const m=p[2];
+      const x=offX+p[0]/PW*sw+drX;
+      const y=offY+p[1]/PH*sh+drY;
+      const a=base*m*m*1.6;
+      if(a<.01)continue;
+      const r=(1.1+m*2.4)*pulse;
+      ctx.fillStyle=`hsla(${hue|0},72%,68%,${a.toFixed(2)})`;
+      ctx.beginPath();ctx.arc(x,y,r,0,TAU);ctx.fill();
+    }
+    ctx.restore();
   }
 }
 
