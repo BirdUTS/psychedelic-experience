@@ -53,12 +53,14 @@ svg{display:block;}
 .mode-label .secondary{font-family:var(--sans);color:var(--ink-faint);font-size:clamp(.6rem,1.2vw,.72rem);letter-spacing:.18em;text-transform:uppercase;margin-top:6px;}
 /* ═══ SOURCE PICKER (splash) ═══ */
 .source-section{display:flex;flex-direction:column;align-items:center;gap:12px;width:100%;}
-.section-label{font-family:var(--sans);font-size:.58rem;letter-spacing:.36em;text-transform:uppercase;color:var(--ink-faint);font-weight:500;}
+.section-label{font-family:var(--sans);font-size:.58rem;letter-spacing:.36em;text-transform:uppercase;color:var(--ink-faint);font-weight:500;display:inline-flex;align-items:baseline;gap:10px;}
+.section-aside{font-family:var(--serif);font-style:italic;font-size:.72rem;letter-spacing:.04em;text-transform:none;color:var(--ink-faint);opacity:.75;}
 .source-pills{display:flex;gap:4px;padding:5px;border:1px solid var(--accent-line);border-radius:var(--radius-pill);background:var(--glass);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);flex-wrap:wrap;justify-content:center;max-width:100%;}
 .source-pill{display:inline-flex;align-items:center;gap:8px;padding:9px 16px;border-radius:var(--radius-pill);font-family:var(--sans);font-size:.68rem;letter-spacing:.18em;text-transform:uppercase;color:var(--ink-dim);transition:color .3s var(--ease),background .3s var(--ease);cursor:pointer;white-space:nowrap;}
 .source-pill:hover{color:var(--ink);background:var(--accent-soft);}
 .source-pill.active{color:var(--ink);background:var(--accent-soft);box-shadow:0 0 0 1px var(--accent-line-strong) inset;}
 .source-pill.active[data-source="mic"]{color:var(--active);box-shadow:0 0 0 1px var(--active-line) inset;background:var(--active-soft);}
+.source-pill.active[data-visual="photo"],.source-pill.active[data-visual="video"]{color:#ffc48a;box-shadow:0 0 0 1px rgba(255,196,138,.4) inset;background:rgba(255,196,138,.1);}
 .source-pill svg{width:13px;height:13px;}
 .source-pill.file-pill{position:relative;}
 .source-pill.file-pill input{position:absolute;inset:0;opacity:0;cursor:pointer;font-size:0;}
@@ -69,6 +71,7 @@ svg{display:block;}
 #source-indicator.visible{opacity:1;}
 #source-indicator .dot{width:6px;height:6px;border-radius:50%;background:var(--accent);box-shadow:0 0 10px rgba(200,168,255,.6);animation:src-pulse 2.6s ease-in-out infinite;}
 #source-indicator.mic .dot{background:var(--active);box-shadow:0 0 10px rgba(138,255,208,.6);}
+#source-indicator.visual .dot{background:#ffc48a;box-shadow:0 0 10px rgba(255,196,138,.6);}
 @keyframes src-pulse{0%,100%{opacity:.45;}50%{opacity:1;}}
 
 /* ═══ IN-EXPERIENCE CONTROLS ═══ */
@@ -134,6 +137,15 @@ svg{display:block;}
     <symbol id="i-upload" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
       <path d="M12 3v12M7 8l5-5 5 5"/><path d="M5 21h14"/>
     </symbol>
+    <symbol id="i-image" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+      <rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="9" cy="10" r="1.6"/><path d="M21 17l-5-5-8 8"/>
+    </symbol>
+    <symbol id="i-film" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+      <rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9h18M3 15h18M8 4v16M16 4v16"/>
+    </symbol>
+    <symbol id="i-none" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+      <circle cx="12" cy="12" r="8"/><path d="M6 18L18 6"/>
+    </symbol>
   </defs>
 </svg>
 <div id="entry">
@@ -171,6 +183,23 @@ svg{display:block;}
         </label>
       </div>
       <div class="source-hint" id="source-hint">An ambient pad that breathes with slow filter sweeps.</div>
+    </div>
+    <div class="source-section">
+      <div class="section-label">Visual Input <span class="section-aside">Optional driver</span></div>
+      <div class="source-pills" id="visual-pills">
+        <button class="source-pill active" data-visual="none">
+          <svg><use href="#i-none"/></svg><span>None</span>
+        </button>
+        <label class="source-pill file-pill" data-visual="photo">
+          <svg><use href="#i-image"/></svg><span>Photo</span>
+          <input type="file" accept="image/*" id="visual-photo-input">
+        </label>
+        <label class="source-pill file-pill" data-visual="video">
+          <svg><use href="#i-film"/></svg><span>Video</span>
+          <input type="file" accept="video/*" id="visual-video-input">
+        </label>
+      </div>
+      <div class="source-hint" id="visual-hint">Audio drives the visuals. Upload a photo or video to drive them with light instead.</div>
     </div>
   </div>
 </div>
@@ -298,6 +327,132 @@ class AudioAnalyser{
     this.mid=.25+.15*Math.sin(t*1.1+1)+.08*Math.sin(t*.37+2);
     this.treble=.15+.1*Math.sin(t*1.9+2)+.06*Math.sin(t*2.7);
     this.volume=.25+.15*Math.sin(t*.5)+hit*.1;
+  }
+}
+
+// ═══════════════════════════════════════════
+// VISUAL ANALYSER (driver mode: photo / video)
+// ═══════════════════════════════════════════
+// Reads a still image or looping video, emits the same {bass,mid,treble,volume}
+// shape as AudioAnalyser. Downstream visualizers consume it unchanged.
+//   bass    = large-scale brightness variation + frame-to-frame flow (for video)
+//   mid     = overall contrast
+//   treble  = edge / high-frequency energy
+//   volume  = mean luminance
+// flowX / flowY are stored for future subject-mode effects — no layer reads them yet.
+class VisualAnalyser{
+  constructor(){
+    this.active=false;
+    this.bass=0;this.mid=0;this.treble=0;this.volume=0;
+    this.flowX=0;this.flowY=0;
+    this.kind=null;this.name='';this.hint='';
+    this._cv=document.createElement('canvas');this._cv.width=64;this._cv.height=64;
+    this._cx=this._cv.getContext('2d',{willReadFrequently:true});
+    this._el=null;this._url=null;this._prev=null;this._t=0;
+  }
+  async init(kind,file){
+    this.teardown();
+    if(!file)return false;
+    this._url=URL.createObjectURL(file);
+    try{
+      if(kind==='photo'){
+        const img=new Image();img.src=this._url;
+        await new Promise((res,rej)=>{img.onload=res;img.onerror=rej;});
+        this._el=img;
+        this.kind='photo';
+        this.name=(file.name||'Photo').replace(/\.[^.]+$/,'').slice(0,28);
+        this.hint='A still image — its palette and texture breathe through the scene.';
+      }else if(kind==='video'){
+        const vid=document.createElement('video');
+        vid.src=this._url;vid.loop=true;vid.muted=true;vid.playsInline=true;
+        vid.setAttribute('playsinline','');vid.setAttribute('muted','');
+        vid.autoplay=true;vid.crossOrigin='anonymous';
+        await new Promise((res,rej)=>{
+          vid.onloadeddata=res;vid.onerror=rej;
+          setTimeout(rej,8000); // timeout safety
+        });
+        try{await vid.play();}catch(e){}
+        this._el=vid;
+        this.kind='video';
+        this.name=(file.name||'Video').replace(/\.[^.]+$/,'').slice(0,28);
+        this.hint='Your footage, re-rendered as living geometry.';
+      }else return false;
+      this.active=true;return true;
+    }catch(e){this.teardown();return false;}
+  }
+  update(dt){
+    if(!this.active||!this._el)return;
+    this._t+=dt;
+    const cx=this._cx,cv=this._cv,W=cv.width,H=cv.height,n=W*H;
+    try{cx.drawImage(this._el,0,0,W,H);}catch(e){return;}
+    const img=cx.getImageData(0,0,W,H).data;
+    const gray=new Float32Array(n);
+    let sum=0;
+    for(let i=0,j=0;i<img.length;i+=4,j++){
+      const g=(img[i]*.3+img[i+1]*.59+img[i+2]*.11)/255;
+      gray[j]=g;sum+=g;
+    }
+    const mean=sum/n;
+    // High-frequency edge energy
+    let edge=0;
+    for(let y=1;y<H-1;y++){
+      for(let x=1;x<W-1;x++){
+        const i=y*W+x;
+        const dx=gray[i+1]-gray[i-1],dy=gray[i+W]-gray[i-W];
+        edge+=Math.sqrt(dx*dx+dy*dy);
+      }
+    }
+    edge/=n;
+    // Low-frequency variation: std-dev of 8×8 pooled blocks
+    const B=8,bs=W/B,blockMean=new Float32Array(B*B),blockCnt=new Float32Array(B*B);
+    for(let y=0;y<H;y++){
+      for(let x=0;x<W;x++){
+        const b=((y/bs)|0)*B+((x/bs)|0);
+        blockMean[b]+=gray[y*W+x];blockCnt[b]++;
+      }
+    }
+    let bassVar=0;
+    for(let b=0;b<blockMean.length;b++){
+      const bm=blockMean[b]/blockCnt[b];bassVar+=(bm-mean)*(bm-mean);
+    }
+    bassVar=Math.sqrt(bassVar/blockMean.length);
+    // Overall contrast (mid)
+    let midVar=0;
+    for(let i=0;i<n;i++){const d=gray[i]-mean;midVar+=d*d;}
+    midVar=Math.sqrt(midVar/n);
+    // Frame-to-frame flow (video only has meaningful flow)
+    let flow=0,fx=0,fy=0;
+    if(this._prev&&this._prev.length===n){
+      for(let y=0;y<H;y++){
+        for(let x=0;x<W;x++){
+          const i=y*W+x;const d=Math.abs(gray[i]-this._prev[i]);
+          flow+=d;fx+=d*(x/W-.5);fy+=d*(y/H-.5);
+        }
+      }
+      flow/=n;
+    }
+    this._prev=gray;
+    // For still photos, modulate with slow LFOs so signal isn't flat
+    const photo=this.kind==='photo';
+    const lfoA=.45+.55*Math.sin(this._t*.6);
+    const lfoB=.45+.55*Math.sin(this._t*1.1+1.3);
+    const lfoC=.45+.55*Math.sin(this._t*1.7+2.1);
+    const modVol=photo?.55+.45*lfoA:1;
+    const modBass=photo?.35+.65*lfoB:1;
+    const modMid=photo?.4+.6*lfoC:1;
+    const S=.78;
+    this.volume=lerp(Math.min(1,mean*1.25)*modVol,this.volume,S);
+    this.bass=lerp(Math.min(1,(bassVar*3+flow*5)*modBass),this.bass,S);
+    this.mid=lerp(Math.min(1,midVar*2.6)*modMid,this.mid,S);
+    this.treble=lerp(Math.min(1,edge*3.6),this.treble,S);
+    this.flowX=fx;this.flowY=fy;
+  }
+  teardown(){
+    if(this._el&&this._el.pause){try{this._el.pause();}catch(e){}}
+    if(this._url){URL.revokeObjectURL(this._url);this._url=null;}
+    this._el=null;this._prev=null;
+    this.active=false;this.kind=null;this.name='';this.hint='';
+    this.bass=this.mid=this.treble=this.volume=0;
   }
 }
 
@@ -1764,6 +1919,8 @@ class App{
     this.colors=new ColorSystem();this.mic=new AudioAnalyser();
     this.audioSrc=new AudioSource();
     this.selectedSource='demo:drift';this.selectedFile=null;
+    this.visual=new VisualAnalyser();
+    this.selectedVisual='none';this.selectedVisualFile=null;
     this.particles=new ParticlePool(2000);this.ripples=new RippleSystem();
     this.trail=new TrailSystem(100);this.rd=new ReactionDiffusion();
     this.attractor=new StrangeAttractor();this.lissajous=new LissajousSystem();
@@ -1819,6 +1976,42 @@ class App{
         if(!f)return;
         this.selectedFile=f;
         selectPill('file');
+      });
+    }
+    // Visual input picker (Phase 2: driver mode only — photo / video)
+    const vpills=document.querySelectorAll('#visual-pills .source-pill');
+    const vhint=document.getElementById('visual-hint');
+    const selectVisual=(kind)=>{
+      vpills.forEach(p=>p.classList.toggle('active',p.dataset.visual===kind));
+      this.selectedVisual=kind;
+      if(vhint){
+        vhint.textContent=
+          kind==='none'?'Audio drives the visuals. Upload a photo or video to drive them with light instead.':
+          kind==='photo'?(this.selectedVisualFile?`Ready: ${this.selectedVisualFile.name}`:'Choose a photo to drive the piece.'):
+          kind==='video'?(this.selectedVisualFile?`Ready: ${this.selectedVisualFile.name}`:'Choose a video clip — it will loop.'):
+          '';
+      }
+    };
+    vpills.forEach(p=>{
+      if(p.classList.contains('file-pill'))return;
+      p.addEventListener('click',e=>{
+        e.stopPropagation();
+        if(p.dataset.visual==='none')this.selectedVisualFile=null;
+        selectVisual(p.dataset.visual);
+      });
+    });
+    const photoInput=document.getElementById('visual-photo-input');
+    if(photoInput){
+      photoInput.addEventListener('change',e=>{
+        const f=e.target.files&&e.target.files[0];if(!f)return;
+        this.selectedVisualFile=f;selectVisual('photo');
+      });
+    }
+    const videoInput=document.getElementById('visual-video-input');
+    if(videoInput){
+      videoInput.addEventListener('change',e=>{
+        const f=e.target.files&&e.target.files[0];if(!f)return;
+        this.selectedVisualFile=f;selectVisual('video');
       });
     }
     // In-experience control buttons
@@ -1905,14 +2098,25 @@ class App{
       let ok=await this.audioSrc.set(kind,opts);
       if(!ok&&kind!=='demo:drift'){kind='demo:drift';ok=await this.audioSrc.set(kind);}
       if(ok)this.mic.attach(this.audioSrc.analyser);
-      // Update HTML indicator
-      const ind=document.getElementById('source-indicator');
-      const indName=document.getElementById('source-indicator-name');
-      if(ind&&indName){
+    }
+    // Initialize visual driver (overrides audio as signal source when active)
+    if(this.selectedVisual!=='none'&&this.selectedVisualFile){
+      const ok=await this.visual.init(this.selectedVisual,this.selectedVisualFile);
+      if(!ok)this.selectedVisual='none';
+    }
+    // Update HTML indicator — visual driver wins the label if present
+    const ind=document.getElementById('source-indicator');
+    const indName=document.getElementById('source-indicator-name');
+    if(ind&&indName){
+      if(this.visual.active){
+        indName.textContent=this.visual.name||this.visual.kind;
+        ind.classList.remove('mic');ind.classList.add('visual');
+      }else{
         indName.textContent=this.audioSrc.name||'—';
         ind.classList.toggle('mic',this.audioSrc.kind==='mic');
-        ind.classList.add('visible');
+        ind.classList.remove('visual');
       }
+      ind.classList.add('visible');
     }
     if(isJourney){this.camera=new JourneyCamera(this.W,this.H);this.camera.active=true;}
     this.started=true;this.lastTime=performance.now()/1000;this.entryTime=this.lastTime;
@@ -1938,11 +2142,12 @@ class App{
       this.sound.droneGain.gain.setTargetAtTime(0,this.sound.ctx.currentTime,.3);
       if(this.sound.ambMaster)this.sound.ambMaster.gain.setTargetAtTime(0,this.sound.ctx.currentTime,.3);
     }
-    // Tear down audio source and analyser
+    // Tear down audio source, visual driver, and analyser
     this.audioSrc.stop();
     this.mic.detach();
+    this.visual.teardown();
     const ind=document.getElementById('source-indicator');
-    if(ind){ind.classList.remove('visible');ind.classList.remove('mic');}
+    if(ind){ind.classList.remove('visible','mic','visual');}
     // Hide controls immediately and prevent re-show
     const ctrlEl=document.getElementById('controls');
     ctrlEl.classList.remove('visible');
@@ -2011,7 +2216,16 @@ class App{
       if(!isFinite(dt)||dt<=0){this.lastTime=now;return;}
       this.lastTime=now;this.time+=dt;this.idleTime+=dt;
       this.timeSys.update();this.breath.update(dt);
-      if(this.mic.active)this.mic.update();else this.mic.fallback(this.time);
+      if(this.visual.active){
+        // Visual driver: read photo/video and write signals into the shared mic bag
+        this.visual.update(dt);
+        this.mic.bass=this.visual.bass;this.mic.mid=this.visual.mid;
+        this.mic.treble=this.visual.treble;this.mic.volume=this.visual.volume;
+      }else if(this.mic.active){
+        this.mic.update();
+      }else{
+        this.mic.fallback(this.time);
+      }
       const audio=this.mic;
 
       this._spawnAmbient();
