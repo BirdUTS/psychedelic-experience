@@ -29,10 +29,11 @@ Everything is defined inside one `<script>` block in load order. `window._app = 
 
 ### Modes
 
-Two entry modes chosen on the splash screen (`ModeSelectScreen`):
+Three entry modes chosen on the splash screen (`ModeSelectScreen`):
 
 - **Stationary ("Observe")** — `App.camera` is `null`; everything renders in screen space.
 - **Journey ("Journey")** — `App.camera` is a `JourneyCamera` that advances along +z, runs an aggressive "maneuver" state machine (banking turns, dives, barrel rolls, zoom rushes) with targets re-rolled every few seconds or on a bass hit, and applies a 2D transform (translate + rotate by `roll` + scale by `zoom` + pitch/yaw as translate) to the canvas for all non-particle content. Particles instead use `camera.project(x,y,z)` for true 3D perspective and get respawned ahead of the camera in `_respawnJourneyParticles`.
+- **Paint ("Paint")** — only unlocked when the user has uploaded a Photo. Replaces the visualizer pipeline entirely with `PaintingMode`, which animates the photo in place via canvas2D drawImage ops: a self-feedback pass (tiny rotate+scale each frame for a slow psychedelic drift), liquify strips (horizontal bands of the original redrawn with sinusoidal x-offsets), a subtle vertical column shimmer, and a screen-blended bass bloom on strong bass hits. Audio signal (`audio.bass`/`mid`/`treble`) modulates displacement magnitude and dim rate. `_loop` short-circuits after signal updates — director, visualizers, and `_renderMain` are skipped. Journey camera is not created in this mode.
 
 ### Systems
 
@@ -58,6 +59,7 @@ Two entry modes chosen on the splash screen (`ModeSelectScreen`):
 - Journey-mode code paths and stationary paths diverge at `const cam = this.camera && this.camera.active ? this.camera : null;` in `_renderMain`. When touching rendering, think through both.
 - **Audio source is picked on the splash screen**, not inside the experience. `App.selectedSource` (`'demo:drift'` default) and `App.selectedFile` are set by the `#source-pills` click handlers and the `#file-input` change handler in `_setupEvents`. `_startExperience` is `async` — it waits on `audioSrc.set(kind, opts)` and falls back to `demo:drift` if mic permission is denied or a file fails to decode. The HTML `#source-indicator` top-left is shown/hidden by `_startExperience` / `_goHome`; there is no in-canvas mic indicator any more.
 - **Visual input is an optional driver, not a separate source.** The splash `#visual-pills` sets `App.selectedVisual` (`'none'` / `'photo'` / `'video'`) and `App.selectedVisualFile`. When non-`none`, `_startExperience` calls `visual.init(kind, file)` and the frame loop prefers `visual` over `mic` as the signal writer. Audio continues to play as picked (Drift / Pulse / etc.) — the visual only takes over as the *driver*. The indicator picks up the `.visual` class and shows the file name when visual is driving.
+- **Paint mode is a whole separate render pipeline, not a scene.** `_startExperience('paint')` requires a photo to be loaded; the splash panel stays `.disabled` until the user picks Photo + a file. When active, `App.paintingMode=true` makes `_loop` short-circuit after signal updates — it clears the canvas, calls `painting.update(dt, audio)`, then `painting.draw(ctx)`, then returns. Scene director, visualizers, trails, particles, and `_renderMain` are all skipped. `goHome` tears `painting` down; `resize` propagates to both internal buffers (`photoCv` + `buf`). Do not try to run director / scene / layer logic in this mode.
 
 ## Product direction
 
