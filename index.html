@@ -589,18 +589,31 @@ class PaintingMode{
     this.W=0;this.H=0;
     this.photoCv=document.createElement('canvas');
     this.photoCx=this.photoCv.getContext('2d');
+    this.photoMirrorCv=document.createElement('canvas');
+    this.photoMirrorCx=this.photoMirrorCv.getContext('2d');
     this.buf=document.createElement('canvas');
     this.bufCx=this.buf.getContext('2d');
     this.img=null;this.t=0;this.active=false;
+    // Phase director — cycles through distinct treatments
+    this.phases=['bloom','mandala','liquid','vortex','shatter','chroma','slitscan'];
+    this.phaseIdx=0;this.prevPhase=null;
+    this.phaseT=0;this.phaseDur=16;this.phaseFade=1;
+    this.bassCoolT=0;this.ripples=[];this.mirror=false;
+    this.phaseName='';
   }
   init(img,W,H){
     this.img=img;this.active=true;this.t=0;
+    this.phaseIdx=Math.floor(Math.random()*this.phases.length);
+    this.prevPhase=null;this.phaseT=0;this.phaseDur=14+Math.random()*8;this.phaseFade=1;
+    this.ripples.length=0;this.mirror=false;
+    this.phaseName=this.phases[this.phaseIdx];
     this.resize(W,H);
   }
   resize(W,H){
     if(!W||!H)return;
     this.W=W;this.H=H;
     this.photoCv.width=W;this.photoCv.height=H;
+    this.photoMirrorCv.width=W;this.photoMirrorCv.height=H;
     this.buf.width=W;this.buf.height=H;
     if(!this.img)return;
     const iw=this.img.naturalWidth||this.img.width||W;
@@ -609,61 +622,260 @@ class PaintingMode{
     const dw=iw*s,dh=ih*s;
     this.photoCx.fillStyle='#050014';this.photoCx.fillRect(0,0,W,H);
     this.photoCx.drawImage(this.img,(W-dw)/2,(H-dh)/2,dw,dh);
-    // Seed the evolving buffer with the photo so frame 1 shows the image
+    // Mirrored copy for kaleido/mirror tricks
+    this.photoMirrorCx.save();
+    this.photoMirrorCx.fillStyle='#050014';this.photoMirrorCx.fillRect(0,0,W,H);
+    this.photoMirrorCx.translate(W,0);this.photoMirrorCx.scale(-1,1);
+    this.photoMirrorCx.drawImage(this.photoCv,0,0);
+    this.photoMirrorCx.restore();
+    // Seed the evolving buffer so frame 1 shows the image
     this.bufCx.fillStyle='#050014';this.bufCx.fillRect(0,0,W,H);
     this.bufCx.drawImage(this.photoCv,0,0);
   }
+  _cut(bassDriven){
+    this.prevPhase=this.phases[this.phaseIdx];
+    // Pick a new phase that isn't the current one
+    let next=this.phaseIdx;
+    while(next===this.phaseIdx)next=Math.floor(Math.random()*this.phases.length);
+    this.phaseIdx=next;
+    this.phaseT=0;this.phaseDur=bassDriven?(10+Math.random()*6):(14+Math.random()*8);
+    this.phaseFade=0;
+    this.phaseName=this.phases[this.phaseIdx];
+    if(Math.random()<0.35)this.mirror=!this.mirror;
+  }
   update(dt,audio){
     if(!this.active)return;
-    this.t+=dt;
+    this.t+=dt;this.phaseT+=dt;this.bassCoolT-=dt;
     const t=this.t,W=this.W,H=this.H,cx=this.bufCx;
     if(!W||!H)return;
-    // Gentle dimming so old echoes bleed toward black instead of saturating
+    // Phase transition — timed, or bass-driven cuts (rate-limited)
+    if(this.phaseT>this.phaseDur){this._cut(false);}
+    else if(audio.bass>0.82&&this.bassCoolT<=0&&this.phaseT>4){
+      this._cut(true);this.bassCoolT=4;
+    }
+    this.phaseFade=Math.min(1,this.phaseT/1.6);
+    // Spawn ripple on strong bass (global effect, runs across phases)
+    if(audio.bass>0.62&&this.bassCoolT<3){
+      if(this.ripples.length<8&&Math.random()<audio.bass*0.4){
+        this.ripples.push({x:W*(.2+Math.random()*.6),y:H*(.2+Math.random()*.6),
+          r:10,maxR:Math.hypot(W,H)*.7,a:0.5,hue:Math.random()*360});
+      }
+    }
+    // ── Continuous base: dim + feedback echo ──
     cx.save();
     cx.globalCompositeOperation='source-over';
-    cx.fillStyle=`rgba(4,0,18,${(0.04+audio.treble*0.035).toFixed(3)})`;
+    cx.fillStyle=`rgba(4,0,18,${(0.045+audio.treble*0.04).toFixed(3)})`;
     cx.fillRect(0,0,W,H);
     cx.restore();
-    // Feedback pass: draw current buffer onto itself with tiny transform
     cx.save();
     cx.translate(W/2,H/2);
-    const breath=1.002+0.006*Math.sin(t*0.42)+audio.bass*0.010;
-    const rot=0.0008*Math.sin(t*0.31)+(Math.sin(t*1.2)*audio.mid*0.004);
+    const breath=1.002+0.006*Math.sin(t*0.42)+audio.bass*0.01;
+    const rot=0.0007*Math.sin(t*0.31)+Math.sin(t*1.2)*audio.mid*0.004;
     cx.rotate(rot);cx.scale(breath,breath);
-    cx.globalAlpha=0.78;
+    cx.globalAlpha=0.76;
     cx.drawImage(this.buf,-W/2,-H/2);
     cx.restore();
-    // Liquify strips: re-assert the photo in melting horizontal bands
-    const N=36,sh=H/N;
-    cx.save();
-    cx.globalAlpha=0.075+audio.mid*0.14+0.03*Math.sin(t*0.6);
-    for(let i=0;i<N;i++){
-      const y=i*sh;
-      const phase=t*0.55+i*0.22;
-      const offX=Math.sin(phase)*(16+audio.bass*40);
-      cx.drawImage(this.photoCv,0,y,W,sh+1,offX,y,W,sh+1);
+    // ── Active phase (+ prev during crossfade) ──
+    const src=this.mirror?this.photoMirrorCv:this.photoCv;
+    if(this.prevPhase&&this.phaseFade<1){
+      this._renderPhase(this.prevPhase,src,audio,1-this.phaseFade);
     }
-    cx.restore();
-    // Vertical column shimmer — every other frame, thin
-    if(((this.t*60)|0)%2===0){
-      const M=24,sw=W/M;
-      cx.save();
-      cx.globalAlpha=0.035+audio.treble*0.08;
-      for(let i=0;i<M;i++){
-        const x=i*sw;
-        const offY=Math.cos(t*0.7+i*0.31)*(8+audio.treble*22);
-        cx.drawImage(this.photoCv,x,0,sw+1,H,x,offY,sw+1,H);
-      }
-      cx.restore();
-    }
-    // Bass bloom: brief screen-blended photo bloom on strong bass
+    this._renderPhase(this.phases[this.phaseIdx],src,audio,this.phaseFade);
+    // ── Global overlays: ripples + bass bloom ──
+    this._drawRipples(cx,dt,audio);
     if(audio.bass>0.55){
       cx.save();
       cx.globalCompositeOperation='screen';
-      cx.globalAlpha=Math.min(0.28,(audio.bass-0.4)*0.55);
+      cx.globalAlpha=Math.min(0.3,(audio.bass-0.4)*0.55);
       const s=1.01+audio.bass*0.06;
       cx.translate(W/2,H/2);cx.scale(s,s);cx.translate(-W/2,-H/2);
+      cx.drawImage(src,0,0);
+      cx.restore();
+    }
+  }
+  _renderPhase(name,src,audio,a){
+    const cx=this.bufCx,W=this.W,H=this.H,t=this.t;
+    if(a<=0.005)return;
+    if(name==='bloom')return this._phaseBloom(cx,src,W,H,t,audio,a);
+    if(name==='mandala')return this._phaseMandala(cx,src,W,H,t,audio,a);
+    if(name==='liquid')return this._phaseLiquid(cx,src,W,H,t,audio,a);
+    if(name==='vortex')return this._phaseVortex(cx,src,W,H,t,audio,a);
+    if(name==='shatter')return this._phaseShatter(cx,src,W,H,t,audio,a);
+    if(name==='chroma')return this._phaseChroma(cx,src,W,H,t,audio,a);
+    if(name==='slitscan')return this._phaseSlitscan(cx,src,W,H,t,audio,a);
+  }
+  // ── Phase 1: bloom — melting horizontal strips, our original effect refined ──
+  _phaseBloom(cx,src,W,H,t,audio,a){
+    const N=36,sh=H/N;
+    cx.save();
+    cx.globalAlpha=a*(0.075+audio.mid*0.14+0.03*Math.sin(t*0.6));
+    for(let i=0;i<N;i++){
+      const y=i*sh;
+      const offX=Math.sin(t*0.55+i*0.22)*(16+audio.bass*40);
+      cx.drawImage(src,0,y,W,sh+1,offX,y,W,sh+1);
+    }
+    cx.restore();
+    if(((this.t*60)|0)%2===0){
+      const M=24,sw=W/M;
+      cx.save();
+      cx.globalAlpha=a*(0.035+audio.treble*0.08);
+      for(let i=0;i<M;i++){
+        const x=i*sw;
+        const offY=Math.cos(t*0.7+i*0.31)*(8+audio.treble*22);
+        cx.drawImage(src,x,0,sw+1,H,x,offY,sw+1,H);
+      }
+      cx.restore();
+    }
+  }
+  // ── Phase 2: mandala — N-fold radial kaleidoscope ──
+  _phaseMandala(cx,src,W,H,t,audio,a){
+    const N=6+(((t*0.08)|0)%3)*2; // 6, 8, 10 cycling
+    const baseRot=t*0.14+audio.bass*0.3;
+    const srcScale=0.9+0.15*Math.sin(t*0.5);
+    cx.save();
+    cx.globalAlpha=a*(0.3+audio.bass*0.25);
+    cx.globalCompositeOperation='source-over';
+    cx.translate(W/2,H/2);
+    const r=Math.max(W,H)*0.8;
+    for(let i=0;i<N;i++){
+      cx.save();
+      cx.rotate(i*TAU/N+baseRot);
+      if(i%2)cx.scale(1,-1);
+      cx.beginPath();
+      cx.moveTo(0,0);cx.arc(0,0,r,-Math.PI/N,Math.PI/N);cx.closePath();
+      cx.clip();
+      cx.scale(srcScale,srcScale);
+      cx.drawImage(src,-W/2,-H/2);
+      cx.restore();
+    }
+    cx.restore();
+  }
+  // ── Phase 3: liquid — flow-field tile displacement (pseudo-Perlin via composed sines) ──
+  _phaseLiquid(cx,src,W,H,t,audio,a){
+    const cols=22,rows=14;
+    const cw=W/cols,rh=H/rows;
+    cx.save();
+    cx.globalAlpha=a*(0.1+audio.mid*0.14);
+    for(let r=0;r<rows;r++){
+      for(let c=0;c<cols;c++){
+        const u=c/cols,v=r/rows;
+        const dx=Math.sin(v*6.3+t*0.45)*(14+audio.bass*30)+Math.sin(u*9.1+t*0.27)*6;
+        const dy=Math.cos(u*5.7+t*0.38)*(14+audio.bass*30)+Math.cos(v*8.3+t*0.19)*6;
+        cx.drawImage(src,c*cw,r*rh,cw+1,rh+1,c*cw+dx,r*rh+dy,cw+1,rh+1);
+      }
+    }
+    cx.restore();
+  }
+  // ── Phase 4: vortex — concentric ring rotations (twirl) ──
+  _phaseVortex(cx,src,W,H,t,audio,a){
+    // Concentric radial slices each rotated by an increasing angle → approximates twirl
+    const rings=8;
+    const maxR=Math.hypot(W,H)*0.55;
+    const baseRot=t*0.25+audio.bass*0.6;
+    cx.save();
+    cx.translate(W/2,H/2);
+    for(let i=rings-1;i>=0;i--){
+      const r0=(i/rings)*maxR;
+      const r1=((i+1)/rings)*maxR;
+      const twist=baseRot*(1+i*0.15);
+      cx.save();
+      cx.beginPath();cx.arc(0,0,r1,0,TAU);
+      if(i>0){cx.arc(0,0,r0,0,TAU,true);}
+      cx.clip();
+      cx.rotate(twist);
+      const scl=1+Math.sin(t*0.6+i*0.4)*0.05;
+      cx.scale(scl,scl);
+      cx.globalAlpha=a*(0.22+audio.bass*0.15);
+      cx.drawImage(src,-W/2,-H/2);
+      cx.restore();
+    }
+    cx.restore();
+  }
+  // ── Phase 5: shatter — tile grid drifts and rotates independently ──
+  _phaseShatter(cx,src,W,H,t,audio,a){
+    const N=9;
+    const cw=W/N,rh=H/N;
+    cx.save();
+    cx.globalAlpha=a*(0.16+audio.bass*0.2);
+    for(let r=0;r<N;r++){
+      for(let c=0;c<N;c++){
+        const seed=r*N+c;
+        const phase=t*0.35+seed*0.73;
+        const dx=Math.sin(phase)*(14+audio.bass*60);
+        const dy=Math.cos(phase*1.31)*(14+audio.bass*60);
+        const rot=Math.sin(phase*0.7)*0.2;
+        const cx0=c*cw+cw/2+dx;
+        const cy0=r*rh+rh/2+dy;
+        cx.save();
+        cx.translate(cx0,cy0);cx.rotate(rot);
+        cx.drawImage(src,c*cw,r*rh,cw+1,rh+1,-cw/2-0.5,-rh/2-0.5,cw+1,rh+1);
+        cx.restore();
+      }
+    }
+    cx.restore();
+  }
+  // ── Phase 6: chroma — chromatic aberration / hue-split echoes ──
+  _phaseChroma(cx,src,W,H,t,audio,a){
+    const split=4+audio.bass*22+Math.sin(t*1.3)*4;
+    cx.save();
+    cx.globalCompositeOperation='screen';
+    cx.globalAlpha=a*0.24;
+    try{cx.filter='hue-rotate(-55deg) saturate(1.5)';}catch(e){}
+    cx.drawImage(src,split,Math.sin(t*0.7)*3);
+    try{cx.filter='hue-rotate(55deg) saturate(1.5)';}catch(e){}
+    cx.drawImage(src,-split,-Math.sin(t*0.7)*3);
+    try{cx.filter='hue-rotate(140deg) saturate(1.3)';}catch(e){}
+    cx.globalAlpha=a*0.14;
+    cx.drawImage(src,0,split*0.4);
+    try{cx.filter='none';}catch(e){}
+    cx.restore();
+    cx.save();cx.globalAlpha=a*0.16;cx.drawImage(src,0,0);cx.restore();
+  }
+  // ── Phase 7: slitscan — rows shift by sin(y*t), vertical melt ──
+  _phaseSlitscan(cx,src,W,H,t,audio,a){
+    const N=Math.max(40,Math.min(80,(H/8)|0));
+    const sh=H/N;
+    cx.save();
+    cx.globalAlpha=a*(0.11+audio.mid*0.13);
+    for(let i=0;i<N;i++){
+      const y=i*sh;
+      const v=i/N;
+      const offX=Math.sin(v*14+t*1.1)*(22+audio.bass*44)*Math.sin(t*0.3+v*3);
+      cx.drawImage(src,0,y,W,sh+1,offX,y,W,sh+1);
+    }
+    cx.restore();
+    // Occasional horizontal "glitch" band
+    if(Math.random()<0.015+audio.bass*0.1){
+      const gy=Math.random()*H,gh=4+Math.random()*18;
+      cx.save();
+      cx.globalCompositeOperation='screen';
+      cx.globalAlpha=a*(0.2+audio.bass*0.3);
+      try{cx.filter='hue-rotate(120deg) saturate(1.6)';}catch(e){}
+      cx.drawImage(src,0,gy,W,gh,-40-audio.bass*60,gy,W,gh);
+      try{cx.filter='none';}catch(e){}
+      cx.restore();
+    }
+  }
+  // Expanding ring of photo reveals (bass ripples)
+  _drawRipples(cx,dt,audio){
+    if(!this.ripples.length)return;
+    const W=this.W,H=this.H;
+    for(let i=this.ripples.length-1;i>=0;i--){
+      const r=this.ripples[i];
+      r.r+=dt*(180+audio.bass*120);
+      r.a*=0.985;
+      if(r.r>r.maxR||r.a<0.02){this.ripples.splice(i,1);continue;}
+      const thick=Math.max(12,40-(r.r/r.maxR)*32);
+      cx.save();
+      cx.globalCompositeOperation='screen';
+      cx.globalAlpha=r.a;
+      cx.beginPath();
+      cx.arc(r.x,r.y,r.r+thick,0,TAU);
+      cx.arc(r.x,r.y,Math.max(0,r.r-thick),0,TAU,true);
+      cx.clip();
+      try{cx.filter=`hue-rotate(${(r.hue)|0}deg) saturate(1.4)`;}catch(e){}
       cx.drawImage(this.photoCv,0,0);
+      try{cx.filter='none';}catch(e){}
       cx.restore();
     }
   }
@@ -673,10 +885,11 @@ class PaintingMode{
   }
   teardown(){
     this.active=false;this.img=null;this.t=0;
-    // Clear buffers so next session starts fresh
+    this.prevPhase=null;this.ripples.length=0;this.mirror=false;
     if(this.W&&this.H){
       this.bufCx.clearRect(0,0,this.W,this.H);
       this.photoCx.clearRect(0,0,this.W,this.H);
+      this.photoMirrorCx.clearRect(0,0,this.W,this.H);
     }
   }
 }
