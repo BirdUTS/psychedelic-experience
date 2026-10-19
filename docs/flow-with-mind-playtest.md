@@ -34,7 +34,9 @@ Offline: press **Download offline assets** once (≈13 MB: engine + three demos)
 
 ## Tested by machine (node:test + unittest, all green)
 
-`node --test tests/*.test.mjs tests/*.test.cjs` → 71 tests. `python3 -m unittest scripts/test_serve_worlds.py` → 3 tests.
+`node --test tests/*.test.mjs tests/*.test.cjs` → 83 tests. `python3 -m unittest scripts/test_serve_worlds.py` → 3 tests.
+
+A fresh whole-branch review (2026-10-20) found one critical and seven important issues; all nine fixes (including pause) landed with a failing test first: microphone-only input now feeds speech and claps into Agency; the director does nothing in silence; speech-likeness drops within 2 s of the voice stopping; off-beat hats no longer double-count beats; palette and fold changes wait for a phrase boundary; physarum colouring uses a palette lookup table (8 ms → 2 ms per frame); a JEV `change_scene` never removes your scene lock; the feedback slider is a baseline the arc moves around; pause freezes the director. Deferred minor items are listed in the branch's review ledger and in the session summary.
 
 Covered: adaptive loudness never amplifies a quiet room; onsets, tempo and coherence on click trains at 60 and 120 Hz display rates and across a 76→108 BPM jump; null frames decay without NaN; speech-likeness; beat clock lock within 4 s, latency compensation, world clock lead/lag by ±0.12 cycle and frequency entrainment; agency from off-beat onsets / speech / surprise / gestures with on-beat onsets discounted; initiative yield < 2 s and resume in 15–25 s, hard lock; the three arcs' shapes, interpolation, pause, hold, override, chaining; director scene gate (dwell, phrase boundary, agency, locks), blocked requests not stalling the arc, novelty budget ≤ 3/min, flow channel, phrase boundaries (16 beats / 20 s), dt spikes, JEV low-confidence fallback to the preset, user symmetry as a floor, steady grooves not counted as agency; JEV client validation, staleness, backoff; feedback mix never reaching white; palettes; simulation parameters, injections, Life pure mode and glider seeding; playlist; server questions, state validation and answer mapping.
 
@@ -51,6 +53,7 @@ The Claude desktop app's browser pane throttles animation to ~0–1 fps while hi
 - Forward flight: boids stayed within z ∈ [−24, 4] (re-spawn ahead works); physarum tunnel built with the arc's 8-fold; Life pure mode shows zero perturbations and 5 generations/beat.
 - JEV: a real decision came back in 3.9 s and was applied (energy/symmetry/palette targets, hold 58 % slowed the arc to 0.42×, low-confidence entropy/initiative left local). Invalid state → 400. A free-form request ("make it dreamier") was classified `none`; "make it dreamier and slower" → `slower`.
 - Offline: after downloading assets, with the server stopped, the page reopened from the service worker with the engine running and the three demos listed.
+- After the review fixes: physarum render 1.9 ms per frame (was 8.2); pause froze arc time and scene dwell, resume continued them; palette `silk` committed at the first frame; no console errors.
 
 ## Not tested (needs a person or a device)
 
