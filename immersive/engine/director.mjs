@@ -97,7 +97,7 @@ export class Director {
     const T = clamp(mix(Tf, lead.T, w.T), 0, 1.5), D = clamp(mix(Df, lead.D, w.D), 0, 1);
     const F = clamp(mix(user.F, lead.F, w.F), 0, 1);
     const leadS = lambda * w.S > 0.5, leadP = lambda * w.P > 0.5, leadCam = lambda * w.Cam > 0.5;
-    const S = leadS ? lead.S : user.S;
+    const S = leadS ? Math.max(user.S, lead.S) : user.S;   // the user's symmetry is a floor, never ignored
     if (leadP) this.palette = lead.palette;
     const camera = leadCam ? lead.camera : user.camera;
     const hue = ((user.hue + (0.5 - B) * 60) % 360 + 360) % 360;

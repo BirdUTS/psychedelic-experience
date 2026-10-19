@@ -11,6 +11,7 @@ import { ARC_ORDER } from './engine/arcs.mjs';
 import { AudioGraph } from './audio.mjs';
 import { Playlist } from './engine/playlist.mjs';
 import { paletteHSL } from './engine/palettes.mjs';
+import { PostFX } from './engine/post.mjs';
 
 const $ = id => document.getElementById(id), TAU = Math.PI * 2;
 const WORLDS = {
@@ -30,6 +31,8 @@ const scene = new THREE.Scene(), camera = new THREE.PerspectiveCamera(65, innerW
 scene.fog = new THREE.FogExp2(0x04070d, 0.022);
 const group = new THREE.Group(); scene.add(group);
 const clock = new THREE.Clock();
+const drawSize = renderer.getDrawingBufferSize(new THREE.Vector2());
+const post = new PostFX(renderer, { width: drawSize.x, height: drawSize.y });
 const dummy = new THREE.Object3D(), color = new THREE.Color(), direction = new THREE.Vector3(), up = new THREE.Vector3(0, 1, 0);
 const starPos = new Float32Array(1800); for (let i = 0; i < starPos.length; i++) starPos[i] = (Math.random() - 0.5) * 100;
 const starsG = new THREE.BufferGeometry(); starsG.setAttribute('position', new THREE.BufferAttribute(starPos, 3));
@@ -164,7 +167,7 @@ canvas.addEventListener('pointermove', e => {
 });
 for (const ev of ['pointerup', 'pointercancel']) canvas.addEventListener(ev, () => { drag = null; attractor = null; });
 canvas.addEventListener('wheel', e => { e.preventDefault(); zoom = Math.max(0.01, Math.min(35, zoom + e.deltaY * 0.008)); }, { passive: false });
-addEventListener('resize', () => { camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); renderer.setSize(innerWidth, innerHeight); });
+addEventListener('resize', () => { camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); renderer.setSize(innerWidth, innerHeight); renderer.getDrawingBufferSize(drawSize); post.setSize(drawSize.x, drawSize.y); });
 const wake = () => { audio.resume(); };
 addEventListener('pointerdown', wake); addEventListener('keydown', wake);
 
@@ -222,8 +225,8 @@ function renderWorld(out) {
     const field = sims.physarum.field;
     for (let i = 0; i < field.length; i++) {
       const v = Math.pow(1 - Math.exp(-field[i] * 1.3), 1.4);
-      const [h, s, l] = paletteHSL(palette, (hue / 360 + 0.48) % 1, v, Math.min(1, v * 0.6 + 0.02));
-      color.setHSL(h, s, l * (v > 0.02 ? 1 : 0.05)); color.convertLinearToSRGB();
+      const [h, s, l] = paletteHSL(palette, (hue / 360 + 0.48) % 1, v, Math.min(1, v * 0.45));
+      color.setHSL(h, s, l * Math.min(1, v * 3)); color.convertLinearToSRGB();
       pixels.data[i * 4] = color.r * 255; pixels.data[i * 4 + 1] = color.g * 255; pixels.data[i * 4 + 2] = color.b * 255; pixels.data[i * 4 + 3] = 255;
     }
     tx.putImageData(pixels, 0, 0); texture.needsUpdate = true;
@@ -278,8 +281,10 @@ function userState() {
 }
 
 let lastHUD = 0, lastExplain = 0, simClock = 0;
+let fps = 60;
 function animate() {
-  const dt = Math.min(clock.getDelta(), 0.1);
+  const raw = clock.getDelta(), dt = Math.min(raw, 0.1);
+  if (raw > 0) fps += (1 / raw - fps) * 0.05;
   if (document.hidden && !renderer.xr.isPresenting) return;
   frame(dt);
 }
@@ -318,7 +323,8 @@ function frame(dt) {
     else { const a = orbit + simTime * 0.025; camera.position.set(Math.sin(a) * zoom, Math.sin(pitch) * zoom, Math.cos(a) * zoom); camera.lookAt(0, 0, 0); }
   }
   group.scale.setScalar(0.95 + fade * 0.05);
-  renderer.render(scene, camera);
+  if (renderer.xr.isPresenting) renderer.render(scene, camera);
+  else post.render(scene, camera, { fold: out.targets.S, feedback: out.targets.F, pulse: out.pulse, dt, fadeSeconds: Math.min(4, 16 * 60 / Math.max(60, out.hud.bpm)) });
   if (now - lastHUD > 0.15) { lastHUD = now; updateHUD(out, frames); }
   if (!$('explain').hidden && now - lastExplain > 0.5) { lastExplain = now; updateExplain(out, latency); }
 }
@@ -328,7 +334,7 @@ function updateHUD(out, frames) {
   [musicF.bands.bass, musicF.bands.mid, musicF.bands.high].forEach((v, i) => bars[i].style.height = (2 + v * 38) + 'px');
   $('phaseDot').style.opacity = (0.15 + 0.85 * out.pulse).toFixed(2);
   $('roomDot').style.opacity = frames.room ? (0.15 + 0.85 * Math.max(roomF.speech, roomF.onset)).toFixed(2) : '0.05';
-  $('stats').textContent = frames.music ? `${frames.source.toUpperCase()} · B ${musicF.bands.bass.toFixed(2)} M ${musicF.bands.mid.toFixed(2)} H ${musicF.bands.high.toFixed(2)}` : 'BASS / MID / HIGH';
+  $('stats').textContent = (frames.music ? `${frames.source.toUpperCase()} · B ${musicF.bands.bass.toFixed(2)} M ${musicF.bands.mid.toFixed(2)} H ${musicF.bands.high.toFixed(2)}` : 'BASS / MID / HIGH') + ` · ${Math.round(fps)} fps`;
   if (autoInitiative) initiativeEl.value = out.I.toFixed(2);
   const sound = audio.context && audio.context.state === 'running';
   const sign = out.I >= 0 ? '+' : '';
@@ -429,4 +435,4 @@ for (let i = 0; i < 2; i++) {
   const controller = renderer.xr.getController(i); scene.add(controller);
   controller.addEventListener('selectstart', () => { gestureCount++; if (i === 0) { const ids = Object.keys(WORLDS); choose(ids[(ids.indexOf(world) + 1) % ids.length]); } else setPause(!paused); });
 }
-addEventListener('pagehide', () => { recognition?.stop(); player.pause(); audio.close(); renderer.setAnimationLoop(null); clean(); texture.dispose(); haloTexture.dispose(); starsG.dispose(); renderer.dispose(); });
+addEventListener('pagehide', () => { recognition?.stop(); player.pause(); audio.close(); renderer.setAnimationLoop(null); clean(); post.dispose(); texture.dispose(); haloTexture.dispose(); starsG.dispose(); renderer.dispose(); });
