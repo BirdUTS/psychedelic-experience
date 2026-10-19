@@ -44,6 +44,7 @@ let world = 'physarum', seed = 100;
 const textureCanvas = document.createElement('canvas'); textureCanvas.width = textureCanvas.height = sims.physarum.size;
 const tx = textureCanvas.getContext('2d'), pixels = tx.createImageData(sims.physarum.size, sims.physarum.size);
 const texture = new THREE.CanvasTexture(textureCanvas); texture.colorSpace = THREE.SRGBColorSpace; texture.minFilter = THREE.LinearFilter; texture.magFilter = THREE.LinearFilter;
+const tunnelTexture = texture.clone();   // same canvas, its own repeat/offset for the flight tunnel
 const haloCanvas = document.createElement('canvas'); haloCanvas.width = haloCanvas.height = 64;
 const hc = haloCanvas.getContext('2d'), hg = hc.createRadialGradient(32, 32, 0, 32, 32, 32);
 hg.addColorStop(0, 'rgba(255,255,255,1)'); hg.addColorStop(0.15, 'rgba(255,255,255,.7)'); hg.addColorStop(0.5, 'rgba(255,255,255,.12)'); hg.addColorStop(1, 'rgba(255,255,255,0)');
@@ -66,7 +67,13 @@ function clean() {
 }
 function build() {
   clean();
-  if (world === 'physarum') {
+  if (world === 'physarum' && cameraMode === 'flight') {
+    // Forward flight: the trail field lines the inside of a tunnel the camera moves through.
+    tunnelTexture.repeat.set(1, 3); tunnelTexture.wrapS = tunnelTexture.wrapT = THREE.RepeatWrapping;
+    const mat = new THREE.MeshBasicMaterial({ map: tunnelTexture, side: THREE.BackSide, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false });
+    visual = new THREE.Mesh(new THREE.CylinderGeometry(6, 6, 60, 48, 1, true), mat);
+    visual.rotation.x = Math.PI / 2; visual.userData.tunnel = true; group.add(visual);
+  } else if (world === 'physarum') {
     const mat = new THREE.MeshBasicMaterial({ map: texture, side: THREE.DoubleSide, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false });
     visual = new THREE.Mesh(new THREE.SphereGeometry(8.5, 64, 40), mat); group.add(visual);
     group.add(new THREE.Mesh(new THREE.SphereGeometry(9, 40, 24), new THREE.MeshBasicMaterial({ color: 0x5a7990, wireframe: true, transparent: true, opacity: 0.025 })));
@@ -151,8 +158,20 @@ addEventListener('keydown', e => { if (e.key === 'Escape') { document.body.class
 $('view').onchange = () => { applyCamera($('view').value, true); bump(); };
 function applyCamera(mode, force = false) {
   if (mode === cameraMode && !force) return;
+  const wasFlight = cameraMode === 'flight';
   cameraMode = mode;
   zoom = mode === 'inside' || mode === 'flight' ? 0.01 : mode === 'close' ? 11 : 19;
+  if (world === 'physarum' && wasFlight !== (mode === 'flight')) build();   // sphere ↔ tunnel
+}
+// Flight: the viewer stays at the origin looking down −z; the world streams toward them.
+function flight(dt, out) {
+  const speed = 2 + 4 * Math.min(1, out.targets.T);
+  if (world === 'boids') {
+    const s = sims.boids, p = s.p;
+    for (let i = 0; i < s.active; i++) { const z = i * 3 + 2; p[z] += speed * dt; if (p[z] > 4) p[z] = -24; }
+  } else if (world === 'physarum' && visual?.userData.tunnel) {
+    tunnelTexture.offset.y -= speed * dt / 20; visual.rotation.y += dt * 0.03;
+  }
 }
 
 // ---------- pointer: orbit, attractor, gestures ----------
@@ -229,8 +248,9 @@ function renderWorld(out) {
       color.setHSL(h, s, l * Math.min(1, v * 3)); color.convertLinearToSRGB();
       pixels.data[i * 4] = color.r * 255; pixels.data[i * 4 + 1] = color.g * 255; pixels.data[i * 4 + 2] = color.b * 255; pixels.data[i * 4 + 3] = 255;
     }
-    tx.putImageData(pixels, 0, 0); texture.needsUpdate = true;
-    visual.rotation.y = simTime * 0.025; visual.scale.setScalar(0.96 + 0.04 * pulse);
+    tx.putImageData(pixels, 0, 0); texture.needsUpdate = true; tunnelTexture.needsUpdate = true;
+    if (!visual.userData.tunnel) { visual.rotation.y = simTime * 0.025; visual.scale.setScalar(0.96 + 0.04 * pulse); }
+    else visual.scale.set(0.97 + 0.03 * pulse, 1, 0.97 + 0.03 * pulse);
   } else if (world === 'swarm') {
     const s = sims.swarm, p = s.p, lines = visual.userData.trail.geometry.attributes.position;
     for (let i = 0; i < s.active; i++) {
@@ -313,13 +333,15 @@ function frame(dt) {
     simTime += step; acc += step; fade = Math.min(1, fade + dt * 0.5);
     const t0 = performance.now(); let steps = 0;
     while (acc >= 1 / 30) { stepSims(1 / 30, out); acc -= 1 / 30; steps++; }
+    if (cameraMode === 'flight') flight(step, out);
     const t1 = performance.now();
     if (!window.__flow.skipRender) renderWorld(out);
     timing.step = t1 - t0; timing.steps = steps; timing.render = performance.now() - t1; timing.dt = dt;
   }
   if (window.__flow.skipRender) { if (now - lastHUD > 0.15) { lastHUD = now; updateHUD(out, frames); } return; }
   if (!renderer.xr.isPresenting) {
-    if (zoom < 0.1) { camera.position.set(0, 0, 0); camera.rotation.set(pitch, orbit, 0, 'YXZ'); }
+    if (cameraMode === 'flight') { camera.position.set(0, 0, 0); camera.rotation.set(pitch * 0.5, orbit * 0.5, Math.sin(simTime * 0.2) * 0.05, 'YXZ'); }
+    else if (zoom < 0.1) { camera.position.set(0, 0, 0); camera.rotation.set(pitch, orbit, 0, 'YXZ'); }
     else { const a = orbit + simTime * 0.025; camera.position.set(Math.sin(a) * zoom, Math.sin(pitch) * zoom, Math.cos(a) * zoom); camera.lookAt(0, 0, 0); }
   }
   group.scale.setScalar(0.95 + fade * 0.05);
@@ -435,4 +457,4 @@ for (let i = 0; i < 2; i++) {
   const controller = renderer.xr.getController(i); scene.add(controller);
   controller.addEventListener('selectstart', () => { gestureCount++; if (i === 0) { const ids = Object.keys(WORLDS); choose(ids[(ids.indexOf(world) + 1) % ids.length]); } else setPause(!paused); });
 }
-addEventListener('pagehide', () => { recognition?.stop(); player.pause(); audio.close(); renderer.setAnimationLoop(null); clean(); post.dispose(); texture.dispose(); haloTexture.dispose(); starsG.dispose(); renderer.dispose(); });
+addEventListener('pagehide', () => { recognition?.stop(); player.pause(); audio.close(); renderer.setAnimationLoop(null); clean(); post.dispose(); texture.dispose(); tunnelTexture.dispose(); haloTexture.dispose(); starsG.dispose(); renderer.dispose(); });
