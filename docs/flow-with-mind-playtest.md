@@ -36,7 +36,18 @@ Offline: press **Download offline assets** once (≈13 MB: engine + three demos)
 
 `node --test tests/*.test.mjs tests/*.test.cjs` → 83 tests. `python3 -m unittest scripts/test_serve_worlds.py` → 3 tests.
 
-A fresh whole-branch review (2026-10-20) found one critical and seven important issues; all nine fixes (including pause) landed with a failing test first: microphone-only input now feeds speech and claps into Agency; the director does nothing in silence; speech-likeness drops within 2 s of the voice stopping; off-beat hats no longer double-count beats; palette and fold changes wait for a phrase boundary; physarum colouring uses a palette lookup table (8 ms → 2 ms per frame); a JEV `change_scene` never removes your scene lock; the feedback slider is a baseline the arc moves around; pause freezes the director. Deferred minor items are listed in the branch's review ledger and in the session summary.
+A fresh whole-branch review (2026-10-20) found one critical and seven important issues; all nine fixes (including pause) landed with a failing test first: microphone-only input now feeds speech and claps into Agency; the director does nothing in silence; speech-likeness drops within 2 s of the voice stopping; off-beat hats no longer double-count beats; palette and fold changes wait for a phrase boundary; physarum colouring uses a palette lookup table (8 ms → 2 ms per frame); a JEV `change_scene` never removes your scene lock; the feedback slider is a baseline the arc moves around; pause freezes the director. Deferred minor findings from that review (not fixed, Bird's call):
+
+- `sims/boids.mjs` allocates three small arrays per boid per step (~32k/s); use scalars or a preallocated `Float32Array(3)`.
+- Hue follows brightness with the sign inverted versus spec §4.5 (bright → warmer instead of cooler); one sign in `director.mjs`.
+- `#view` and `#symmetry` show the user's value while the effective camera/fold may differ when the arc leads; the Explain panel shows the truth.
+- `serve_worlds.py` path checks are case-sensitive; on macOS `/Scripts/x.PY` would be served (source only, bound to 127.0.0.1).
+- The director re-applies the latest arc `I0` at every waypoint change, so a JEV `initiative` baseline can be overwritten within ≤ 45 s.
+- OS revocation of the mic stops capture but the Room mic button keeps saying "on" (the HUD does say `room off`).
+- `index.html` ships `#jev` disabled with a stale title; the app enables it at runtime.
+- A fold change mid-fade keeps the old `foldPrev` (small pop); the fade is capped at 4 s rather than one phrase.
+- `serve_worlds.py` hard-codes the AI Lab `.env` path; `.gitignore` lists `__pycache__/` twice.
+- `map_answers` uses banker's rounding for symmetry (2.5 → 4-fold); the Python tests cover the pure functions, not the HTTP handler.
 
 Covered: adaptive loudness never amplifies a quiet room; onsets, tempo and coherence on click trains at 60 and 120 Hz display rates and across a 76→108 BPM jump; null frames decay without NaN; speech-likeness; beat clock lock within 4 s, latency compensation, world clock lead/lag by ±0.12 cycle and frequency entrainment; agency from off-beat onsets / speech / surprise / gestures with on-beat onsets discounted; initiative yield < 2 s and resume in 15–25 s, hard lock; the three arcs' shapes, interpolation, pause, hold, override, chaining; director scene gate (dwell, phrase boundary, agency, locks), blocked requests not stalling the arc, novelty budget ≤ 3/min, flow channel, phrase boundaries (16 beats / 20 s), dt spikes, JEV low-confidence fallback to the preset, user symmetry as a floor, steady grooves not counted as agency; JEV client validation, staleness, backoff; feedback mix never reaching white; palettes; simulation parameters, injections, Life pure mode and glider seeding; playlist; server questions, state validation and answer mapping.
 
