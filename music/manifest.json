@@ -1,0 +1,29 @@
+[
+  {
+    "id": "01-tidal-garden",
+    "title": "潮汐花園",
+    "src": "music/01-tidal-garden.mp3",
+    "provider": "Suno via EvoLink",
+    "requestedDuration": 90,
+    "style": "Original instrumental ambient electronica, approximately 76 BPM, 90 seconds. Spacious underwater atmosphere, warm evolving pads, isolated soft low kick, delicate high bell plucks. Quiet introduction, gentle pulse grows in middle, spacious ending. Clear contrasting bass and treble, no vocals.",
+    "duration": 89.64
+  },
+  {
+    "id": "02-firefly-convergence",
+    "title": "螢火同步",
+    "src": "music/02-firefly-convergence.mp3",
+    "provider": "Suno via EvoLink",
+    "requestedDuration": 90,
+    "style": "Original instrumental melodic downtempo electronica, approximately 108 BPM, 90 seconds. Rounded distinct kick drum and bass, interlocking crystalline arpeggios, syncopated percussion, shimmering spacious synths. Intro then rhythmic build then brief breakdown and full groove return. No vocals.",
+    "duration": 89.64
+  },
+  {
+    "id": "03-mycelium-drive",
+    "title": "菌網脈衝",
+    "src": "music/03-mycelium-drive.mp3",
+    "provider": "Suno via EvoLink",
+    "requestedDuration": 90,
+    "style": "Original instrumental psychedelic electronic dance music, approximately 132 BPM, 90 seconds. Deep tight four on floor kick, elastic rolling bass, spiralling acid-like synth pattern, crisp high percussion, gradual energy build, quiet breakdown, rhythmic return, resolved ending. Rich frequency contrast without harsh noise. No vocals.",
+    "duration": 89.59
+  }
+]
