@@ -12,6 +12,7 @@ import { AudioGraph } from './audio.mjs';
 import { Playlist } from './engine/playlist.mjs';
 import { paletteHSL } from './engine/palettes.mjs';
 import { PostFX } from './engine/post.mjs';
+import { JevClient, buildState } from './engine/jev-client.mjs';
 
 const $ = id => document.getElementById(id), TAU = Math.PI * 2;
 const WORLDS = {
@@ -117,8 +118,12 @@ window.__flow = {
 let paused = matchMedia('(prefers-reduced-motion: reduce)').matches, simTime = 0, acc = 0, lifeAcc = 0, fade = 1;
 let orbit = 0, pitch = 0.12, zoom = 19, attractor = null, xrSession = null, cameraMode = 'orbit';
 let autoInitiative = true, sceneLocked = false, gestureCount = 0, lastGesture = 0, lastOut = null, lastFrames = null;
-let requestVersion = 0; const bump = () => { requestVersion++; };
-let jevEnabled = false;   // the online director is wired in a later step
+const jev = new JevClient({ now: () => performance.now() / 1000 });
+const bump = () => { jev.bump(); };
+// Thirty-second summaries for JEV's bounded state.
+const summary = { E30: 0, E5: 0, C30: 0, B30: 0, A30: 0 };
+const recentDecisions = [];
+let lastJevAsk = -Infinity, lastWaypointSeen = -1;
 
 // ---------- scene selection ----------
 function choose(id, { auto = false } = {}) {
@@ -323,6 +328,11 @@ function frame(dt) {
     gestures: gestureCount, user: userState(), online: navigator.onLine,
   });
   gestureCount = 0; lastOut = out;
+  const k30 = 1 - Math.exp(-dt / 30), k5 = 1 - Math.exp(-dt / 5);
+  summary.E30 += (out.hud.E - summary.E30) * k30; summary.E5 += (out.hud.E - summary.E5) * k5;
+  summary.C30 += (out.hud.C - summary.C30) * k30; summary.B30 += ((musicF ? musicF.B : 0) - summary.B30) * k30; summary.A30 += (out.As - summary.A30) * k30;
+  if (out.request) handleRequest(out.request);
+  if (jev.enabled && navigator.onLine && !paused && now - lastJevAsk >= 24) askJev('');
   const sim = sims[world];
   sim.setParams({ H: out.targets.H, T: Math.min(1, out.targets.T), D: out.targets.D });
   if (out.injection) sim.inject(Math.random, 60 / out.hud.bpm);
@@ -364,7 +374,7 @@ function updateHUD(out, frames) {
   if (!sound && !audio.synthetic) line += ' · tap to start sound';
   else if (frames.music) line += ` · ${Math.round(out.hud.bpm)} BPM · C ${out.hud.C.toFixed(2)} · E ${out.hud.E.toFixed(2)} · room ${frames.room ? 'on' : 'off'}`;
   else line += ' · listening';
-  line += navigator.onLine && jevEnabled ? ' · JEV' : ' · LOCAL DIRECTOR';
+  line += navigator.onLine && jev.enabled ? ' · JEV' : ' · LOCAL DIRECTOR';
   $('hud').textContent = line;
 }
 function updateExplain(out, latency) {
@@ -403,11 +413,51 @@ function localCommand(text) {
   if (handled) bump();
   return handled;
 }
+// Bounded actions JEV may return for a spoken or typed request.
+function handleRequest(action) {
+  const map = {
+    slower: () => setSlider('speed', 0.45), faster: () => setSlider('speed', 1.5),
+    warmer: () => setSlider('hue', 20), cooler: () => setSlider('hue', 200),
+    surround: () => { $('view').value = 'inside'; applyCamera('inside', true); },
+    calm_down: () => setSlider('intensity', 0.4),
+    hold_scene: () => { if (!sceneLocked) $('lockScene').click(); },
+    change_scene: () => { if (sceneLocked) $('lockScene').click(); },
+    more_symmetry: () => { $('symmetry').value = String(Math.min(8, (+$('symmetry').value || 0) + 2)); },
+    less_symmetry: () => { $('symmetry').value = String(Math.max(0, +$('symmetry').value - 2)); },
+  };
+  if (map[action]) { map[action](); $('decision').textContent = 'JEV request → ' + action.replace('_', ' '); }
+}
+function jevState(text = '') {
+  return buildState({
+    scene: world, sceneAge: director.sceneAge,
+    arc: { name: director.arcs.arcName, waypoint: director.arcs.index },
+    features: { E_mean30: summary.E30, E_trend: summary.E5 - summary.E30, C_mean30: summary.C30, B_mean30: summary.B30, A_mean30: summary.A30, bpm: musicF ? musicF.bpm : 0 },
+    initiative: { I: director.initiative.I, locked: director.initiative.locked, I0: director.initiative.I0 },
+    locks: { scene: sceneLocked }, userText: text, recentDecisions, online: navigator.onLine,
+  });
+}
+async function askJev(text = '', force = false) {
+  lastJevAsk = simClock;
+  const decision = await jev.maybeRequest(() => jevState(text), { force });
+  if (!decision) { if (jev.lastError) $('decision').textContent = `JEV unavailable (${jev.lastError}); local rules continue.`; return; }
+  director.applyDecision(decision);
+  const applied = Object.keys(decision).filter(k => !['version', 'confidence', 'hold'].includes(k));
+  const left = Object.keys(decision.confidence || {}).filter(k => !applied.includes(k));
+  const line = `JEV: ${applied.map(k => k === 'scene' ? `scene→${decision.scene.choice} (${Math.round(decision.scene.p * 100)}%)` : `${k}=${typeof decision[k] === 'number' ? decision[k].toFixed(2) : decision[k]}`).join(' · ') || 'no change'}` +
+    (decision.hold !== undefined ? ` · hold ${Math.round(decision.hold * 100)}%` : '') + (left.length ? ` · left local: ${left.join(', ')}` : '');
+  recentDecisions.push(line.slice(0, 120)); while (recentDecisions.length > 3) recentDecisions.shift();
+  $('decision').textContent = line;
+}
+$('jev').disabled = false; $('jev').title = 'Ask the online director for bounded targets every ~24 s';
+$('jev').onclick = () => { jev.enabled = !jev.enabled; jev.bump(); $('jev').textContent = 'JEV: ' + (jev.enabled ? 'on' : 'off'); $('jev').setAttribute('aria-pressed', String(jev.enabled)); if (jev.enabled) askJev('', true); else $('decision').textContent = 'Local director running.'; };
 function decide(text = '') {
   if (text && localCommand(text)) { $('decision').textContent = 'Applied locally: ' + text; return; }
-  $('decision').textContent = text ? 'Not a local phrase. Try: slower, faster, fish, mycelium, fireflies, life, surround me, lead me, follow me, hold, warmer, cooler, calm.' : 'Local director running.';
+  if (!text) { $('decision').textContent = 'Local director running.'; return; }
+  if (jev.enabled && navigator.onLine) { $('decision').textContent = 'Asking JEV…'; askJev(text, true); return; }
+  $('decision').textContent = 'Not a local phrase. Try: slower, faster, fish, mycelium, fireflies, life, surround me, lead me, follow me, hold, warmer, cooler, calm. Turn JEV on for free-form requests.';
 }
 $('commandForm').onsubmit = e => { e.preventDefault(); const text = $('command').value.trim(); $('command').value = ''; if (text) decide(text); };
+window.__flow.jev = jev; window.__flow.askJev = askJev; window.__flow.jevState = jevState;
 const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition; let recognition = null;
 if (!Recognition) { $('listen').disabled = true; $('listen').textContent = 'Type a request'; }
 else $('listen').onclick = () => {
@@ -421,7 +471,7 @@ else $('listen').onclick = () => {
 
 // ---------- network, offline, XR, cleanup ----------
 function network() { $('network').textContent = navigator.onLine ? 'LOCAL ENGINE · ONLINE AVAILABLE' : 'OFFLINE · LOCAL DIRECTOR'; }
-network(); addEventListener('online', () => { network(); bump(); }); addEventListener('offline', () => { network(); bump(); });
+network(); addEventListener('online', () => { network(); bump(); }); addEventListener('offline', () => { network(); bump(); $('decision').textContent = 'Offline: local director continues; JEV answers are dropped.'; });
 addEventListener('pageshow', e => { if (e.persisted) location.reload(); });
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('../sw.js').catch(() => { $('offlineStatus').textContent = 'Offline cache unavailable; use localhost or HTTPS.'; });
 $('offline').onclick = async () => {

@@ -53,7 +53,8 @@ export function validateDecision(raw, { sentVersion, sentAt, now, maxAge = 10, f
 }
 
 export class JevClient {
-  constructor({ fetchFn = globalThis.fetch, now = () => performance.now() / 1000, minGap = 15, maxAge = 10, url = '/api/decide', floor = 0.45 } = {}) {
+  // fetch must be called on its global (an unbound reference throws "Illegal invocation" in browsers).
+  constructor({ fetchFn = (...args) => globalThis.fetch(...args), now = () => performance.now() / 1000, minGap = 15, maxAge = 10, url = '/api/decide', floor = 0.45 } = {}) {
     this.fetchFn = fetchFn; this.now = now; this.minGap = minGap; this.maxAge = maxAge; this.url = url; this.floor = floor;
     this.enabled = false; this.version = 0; this.inFlight = false; this.backoff = 0;
     this.lastSent = -Infinity; this.blockedUntil = -Infinity; this.lastError = null;
