@@ -42,7 +42,7 @@ export class AudioFeatures {
     this.sinceOnset = 1;
     this.acfTimer = 0; this.cRaw = 0; this.windowMean = 0;
     this.candidate = 0; this.candidateCount = 0;
-    this.lp8 = 0; this.lp2 = 0; this.mod2 = 0; this.vMean = 0;
+    this.lp8 = 0; this.lp2 = 0; this.modAbs = 0; this.vMean = 0;
     this.quiet = true;
   }
 
@@ -107,10 +107,12 @@ export class AudioFeatures {
     const v = b.voice;
     this.lp8 = blend(this.lp8, v, dt, 1 / (TAU * 8));
     this.lp2 = blend(this.lp2, v, dt, 1 / (TAU * 2));
+    // Numerator and denominator share one time constant and the denominator has a noise floor,
+    // so speech-likeness falls within ~2 s of the voice stopping instead of lingering as the band fades.
     const mod = this.lp8 - this.lp2;
-    this.mod2 = blend(this.mod2, mod * mod, dt, 1);
-    this.vMean = blend(this.vMean, v, dt, 1);
-    this.speech = blend(this.speech, clamp01(4 * Math.sqrt(this.mod2) / (this.vMean + 1e-3)), dt, 0.3);
+    this.modAbs = blend(this.modAbs, Math.abs(mod), dt, 0.4);
+    this.vMean = blend(this.vMean, v, dt, 0.4);
+    this.speech = blend(this.speech, clamp01(5 * this.modAbs / (this.vMean + 0.08)), dt, 0.3);
     return this;
   }
 
@@ -122,7 +124,7 @@ export class AudioFeatures {
     this.B = blend(this.B, 0, dt, 1);
     this.C = blend(this.C, 0, dt, 0.5); if (this.C < 1e-4) this.C = 0;
     this.speech = blend(this.speech, 0, dt, 0.3);
-    this.mod2 = blend(this.mod2, 0, dt, 1); this.vMean = blend(this.vMean, 0, dt, 1);
+    this.modAbs = blend(this.modAbs, 0, dt, 0.4); this.vMean = blend(this.vMean, 0, dt, 0.4);
     this.lp8 = blend(this.lp8, 0, dt, 1 / (TAU * 8)); this.lp2 = blend(this.lp2, 0, dt, 1 / (TAU * 2));
     this.pushFlux(0, dt);
     this.windowMean = blend(this.windowMean, 0, dt, 1);

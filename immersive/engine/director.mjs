@@ -19,8 +19,9 @@ export class Director {
     this.scene = scene; this.dwell = dwell; this.noveltyRefill = noveltyRefill;
     this.sceneAge = 0; this.wall = 0; this.clock = 0;
     this.N = 0.5;                    // novelty budget starts half full: one injection available at once, never two in the first second
-    this.eAvg = 0;
-    this.palette = 'ink';
+    this.eAvg = 0; this.hadMusic = false;
+    this.palette = null; this.committedS = null;   // lead palette and fold commit only on phrase boundaries
+    this.lastOut = null;
     this.jevSceneRequest = null; this.pendingRequest = null; this.jevAxes = new Set();
     this.appliedArcIndex = -1; this.appliedArcName = null;
   }
@@ -48,20 +49,28 @@ export class Director {
   }
 
   update(dt, input) {
+    if (input.paused && this.lastOut) return this.lastOut;   // a paused world advances nothing
     dt = clamp(dt || 0, 0, 0.1);
     this.clock += dt;
     const music = input.music, room = input.room, user = input.user;
     const E = music ? music.E : 0, C = music ? music.C : 0, onset = music ? music.onset : 0, B = music ? music.B : 0.5;
 
     // 1. Music clock and surprise (prediction error against the beat-phase model).
+    //    With no music there is nothing to be surprised by: the predictor is cleared so a stale groove
+    //    cannot make the director act in silence.
     this.beat.setLatency(music ? music.latency || 0 : 0);
     this.beat.update(dt, { onset, bpm: music && music.bpm ? music.bpm : this.beat.bpm, C });
-    const predicted = this.predictor.predict(this.beat.phase);
-    this.eAvg = blend(this.eAvg, E, dt, 2);
-    let surprise = Math.abs(E - (predicted == null ? this.eAvg : predicted));
-    if (onset > 0.5 && this.beat.distanceToBeat() > 0.3 && C > 0.4) surprise += 1;
-    surprise = Math.min(1, surprise);
-    if (music) this.predictor.observe(this.beat.phase, E);
+    if (!music && this.hadMusic) { this.predictor.reset(); this.eAvg = 0; }
+    this.hadMusic = !!music;
+    const predicted = music ? this.predictor.predict(this.beat.phase) : null;
+    let surprise = 0;
+    if (music) {
+      this.eAvg = blend(this.eAvg, E, dt, 2);
+      surprise = Math.abs(E - (predicted == null ? this.eAvg : predicted));
+      if (onset > 0.5 && this.beat.distanceToBeat() > 0.3 && C > 0.4) surprise += 1;
+      surprise = Math.min(1, surprise);
+      this.predictor.observe(this.beat.phase, E);
+    }
 
     // 2. Agency → Initiative.
     if (input.gestures) this.agency.gesture(input.gestures);
@@ -95,10 +104,15 @@ export class Director {
     const Hf = 0.35 + 0.5 * (1 - C), Tf = 0.6 + 0.9 * E, Df = 0.3 + 0.7 * E;
     const hTarget = mix(Hf, lead.H, w.H);
     const T = clamp(mix(Tf, lead.T, w.T), 0, 1.5), D = clamp(mix(Df, lead.D, w.D), 0, 1);
-    const F = clamp(mix(user.F, lead.F, w.F), 0, 1);
+    // Feedback: the user's slider is the baseline; the arc moves around it (0.3 is the arcs' neutral value).
+    const F = clamp(user.F + lambda * w.F * (lead.F - 0.3), 0, 1);
     const leadS = lambda * w.S > 0.5, leadP = lambda * w.P > 0.5, leadCam = lambda * w.Cam > 0.5;
-    const S = leadS ? Math.max(user.S, lead.S) : user.S;   // the user's symmetry is a floor, never ignored
-    if (leadP) this.palette = lead.palette;
+    // Palette mode and fold count from the arc commit on phrase boundaries (the first one immediately).
+    if (this.committedS === null) this.committedS = lead.S;
+    else if (lead.S !== this.committedS && phraseBoundary) this.committedS = lead.S;
+    if (leadP && (this.palette === null || (lead.palette !== this.palette && phraseBoundary))) this.palette = lead.palette;
+    const S = leadS ? Math.max(user.S, this.committedS) : user.S;   // the user's symmetry is a floor, never ignored
+    const palette = this.palette ?? 'ink';
     const camera = leadCam ? lead.camera : user.camera;
     const hue = ((user.hue + (0.5 - B) * 60) % 360 + 360) % 360;
     const hWidth = 0.15 + 0.25 * C;
@@ -119,9 +133,9 @@ export class Director {
 
     const request1 = this.pendingRequest; this.pendingRequest = null;
     const src = (axis, leadActive, userTouched) => leadActive ? (this.jevAxes.has(axis) ? 'jev' : 'arc') : (userTouched ? 'you' : 'music');
-    return {
+    return this.lastOut = {
       I, lambda, As, phase: this.beat.phase, worldPhase: this.world.phase, pulse, phraseBoundary, surprise,
-      targets: { H, T, D, S, F, palette: this.palette, hue, camera, omega: lead.omega },
+      targets: { H, T, D, S, F, palette, hue, camera, omega: lead.omega },
       hTarget, hWidth, sceneChange, injection, request: request1,
       hud: {
         leading: I > 0.2 ? 'LEADING' : I < -0.2 ? 'FOLLOWING' : 'MUTUAL',

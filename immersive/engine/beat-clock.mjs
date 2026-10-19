@@ -6,19 +6,27 @@ const wrap = x => ((x % 1) + 1) % 1;
 export class BeatClock {
   constructor({ latency = 0, kappa = 0.3 } = {}) {
     this.latency = latency; this.kappa = kappa;
-    this.internal = 0; this.phase = 0; this.bpm = 120;
-    this.beatIndex = 0; this.wrapped = false;
+    this.cycles = 0;          // unwrapped internal phase, cycles
+    this.phase = 0; this.bpm = 120;
+    this.beatIndex = 0; this.wrapped = false; this.lastBeat = 0;
   }
+  get internal() { return wrap(this.cycles); }
   setLatency(seconds) { this.latency = Number.isFinite(seconds) ? Math.max(0, seconds) : 0; }
   update(dt, { onset = 0, bpm = this.bpm, C = 0 } = {}) {
     if (Number.isFinite(bpm) && bpm > 0) this.bpm = bpm;
-    let p = this.internal + dt * this.bpm / 60;
-    if (onset > 0) p += this.kappa * Math.min(1, onset) * Math.sin(-TAU * wrap(p));
-    this.internal = wrap(p);
-    const previous = this.phase;
-    this.phase = wrap(this.internal + this.latency * this.bpm / 60);
-    this.wrapped = this.phase < previous && previous - this.phase > 0.5;
-    if (this.wrapped) this.beatIndex++;
+    let c = this.cycles + dt * this.bpm / 60;
+    // PLL kick toward the nearest beat: at most kappa/(2π) ≈ 0.05 cycle per onset, so off-beat
+    // hats nudge rather than yank, and onsets on the beat barely move it.
+    if (onset > 0) c += this.kappa * Math.min(1, onset) * Math.sin(-TAU * wrap(c)) / TAU;
+    this.cycles = c;
+    const reported = c + this.latency * this.bpm / 60;
+    this.phase = wrap(reported);
+    // Beats are counted from the unwrapped phase, so a backward correction across a beat un-counts it
+    // instead of counting the same beat twice.
+    const beat = Math.floor(reported);
+    this.wrapped = beat > this.lastBeat;
+    this.beatIndex += beat - this.lastBeat;
+    this.lastBeat = beat;
     return this;
   }
   distanceToBeat() { const d = this.phase; return d > 0.5 ? 1 - d : d; }

@@ -10,9 +10,11 @@ import { Director } from './engine/director.mjs';
 import { ARC_ORDER } from './engine/arcs.mjs';
 import { AudioGraph } from './audio.mjs';
 import { Playlist } from './engine/playlist.mjs';
-import { paletteHSL } from './engine/palettes.mjs';
+import { paletteHSL, paletteLUT } from './engine/palettes.mjs';
 import { PostFX } from './engine/post.mjs';
 import { JevClient, buildState } from './engine/jev-client.mjs';
+import { directorInput } from './engine/streams.mjs';
+import { requestActions } from './engine/requests.mjs';
 
 const $ = id => document.getElementById(id), TAU = Math.PI * 2;
 const WORLDS = {
@@ -246,14 +248,14 @@ function paletteColor(mode, hue, t, v) { const [h, s, l] = paletteHSL(mode, hue 
 function renderWorld(out) {
   const { palette, hue } = out.targets, pulse = 1 + 0.25 * out.pulse * +$('intensity').value;
   if (world === 'physarum') {
-    const field = sims.physarum.field;
+    // One palette lookup table per (mode, hue); per pixel only an index and a darkening multiply.
+    const field = sims.physarum.field, lut = paletteLUT(palette, (hue / 360 + 0.48) % 1), data = pixels.data;
     for (let i = 0; i < field.length; i++) {
-      const v = Math.pow(1 - Math.exp(-field[i] * 1.3), 1.4);
-      const [h, s, l] = paletteHSL(palette, (hue / 360 + 0.48) % 1, v, Math.min(1, v * 0.45));
-      color.setHSL(h, s, l * Math.min(1, v * 3)); color.convertLinearToSRGB();
-      pixels.data[i * 4] = color.r * 255; pixels.data[i * 4 + 1] = color.g * 255; pixels.data[i * 4 + 2] = color.b * 255; pixels.data[i * 4 + 3] = 255;
+      const v = Math.pow(1 - Math.exp(-field[i] * 1.3), 1.4), k = Math.min(1, v * 3), idx = ((v * 255) | 0) * 3, o = i * 4;
+      data[o] = lut[idx] * k; data[o + 1] = lut[idx + 1] * k; data[o + 2] = lut[idx + 2] * k; data[o + 3] = 255;
     }
-    tx.putImageData(pixels, 0, 0); texture.needsUpdate = true; tunnelTexture.needsUpdate = true;
+    tx.putImageData(pixels, 0, 0);
+    if (visual.userData.tunnel) tunnelTexture.needsUpdate = true; else texture.needsUpdate = true;
     if (!visual.userData.tunnel) { visual.rotation.y = simTime * 0.025; visual.scale.setScalar(0.96 + 0.04 * pulse); }
     else visual.scale.set(0.97 + 0.03 * pulse, 1, 0.97 + 0.03 * pulse);
   } else if (world === 'swarm') {
@@ -322,11 +324,7 @@ function frame(dt) {
   ensureFeatures(frames.sampleRate);
   musicF.update(frames.music, dt); roomF.update(frames.room, dt);
   const latency = audio.latency();
-  const out = director.update(dt, {
-    music: frames.music ? { E: musicF.E, onset: musicF.onset, B: musicF.B, C: musicF.C, bpm: musicF.bpm, latency: latency.music } : null,
-    room: frames.room ? { onset: roomF.onset, speech: roomF.speech } : null,
-    gestures: gestureCount, user: userState(), online: navigator.onLine,
-  });
+  const out = director.update(dt, directorInput({ frames, musicF, roomF, latency, gestures: gestureCount, user: userState(), online: navigator.onLine, paused }));
   gestureCount = 0; lastOut = out;
   const k30 = 1 - Math.exp(-dt / 30), k5 = 1 - Math.exp(-dt / 5);
   summary.E30 += (out.hud.E - summary.E30) * k30; summary.E5 += (out.hud.E - summary.E5) * k5;
@@ -415,17 +413,15 @@ function localCommand(text) {
 }
 // Bounded actions JEV may return for a spoken or typed request.
 function handleRequest(action) {
-  const map = {
-    slower: () => setSlider('speed', 0.45), faster: () => setSlider('speed', 1.5),
-    warmer: () => setSlider('hue', 20), cooler: () => setSlider('hue', 200),
-    surround: () => { $('view').value = 'inside'; applyCamera('inside', true); },
-    calm_down: () => setSlider('intensity', 0.4),
-    hold_scene: () => { if (!sceneLocked) $('lockScene').click(); },
-    change_scene: () => { if (sceneLocked) $('lockScene').click(); },
-    more_symmetry: () => { $('symmetry').value = String(Math.min(8, (+$('symmetry').value || 0) + 2)); },
-    less_symmetry: () => { $('symmetry').value = String(Math.max(0, +$('symmetry').value - 2)); },
-  };
-  if (map[action]) { map[action](); $('decision').textContent = 'JEV request → ' + action.replace('_', ' '); }
+  const actions = requestActions(action, { sceneLocked, symmetry: +$('symmetry').value || 0 });
+  for (const a of actions) {
+    if (a.type === 'slider') setSlider(a.id, a.value);
+    else if (a.type === 'camera') { $('view').value = a.value; applyCamera(a.value, true); }
+    else if (a.type === 'lockScene') { if (sceneLocked !== a.value) $('lockScene').click(); }
+    else if (a.type === 'symmetry') $('symmetry').value = String(a.value);
+    else if (a.type === 'note') $('decision').textContent = a.text;
+  }
+  if (actions.length && !actions.some(a => a.type === 'note')) $('decision').textContent = 'JEV request → ' + action.replace('_', ' ');
 }
 function jevState(text = '') {
   return buildState({
