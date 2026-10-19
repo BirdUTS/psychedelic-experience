@@ -1,0 +1,8 @@
+
+.local/
+
+__pycache__/
+*.pyc
+.superpowers/
+.DS_Store
+__pycache__/
