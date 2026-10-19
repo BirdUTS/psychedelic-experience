@@ -29,11 +29,13 @@ export class WorldClock {
     this.Kmax = Kmax; this.phiMax = phiMax; this.gamma = gamma;
     this.phase = 0; this.omega = 1;
   }
-  update(dt, { musicPhase = 0, C = 0, I = 0, omega = this.omega } = {}) {
+  update(dt, { musicPhase = 0, C = 0, I = 0, omega = this.omega, musicHz = null } = {}) {
     if (Number.isFinite(omega)) this.omega = omega;
+    // Frequency entrainment: in a groove the world's own tempo relaxes to the beat's; free-running it keeps omega.
+    const effective = Number.isFinite(musicHz) && musicHz > 0 ? this.omega + (musicHz - this.omega) * C : this.omega;
     // Advance by the natural frequency first so the pull compares phases at the same instant
     // as the musicPhase supplied for this frame (otherwise a dt·omega bias appears in the offset).
-    const predicted = this.phase + dt * this.omega;
+    const predicted = this.phase + dt * effective;
     const target = musicPhase + I * this.phiMax;
     const pull = this.Kmax * C * Math.sin(TAU * (target - predicted)) / TAU;
     this.phase = wrap(predicted + dt * pull);

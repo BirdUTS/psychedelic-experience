@@ -20,6 +20,8 @@ export class AudioFeatures {
     this.fluxEnd = this.range.high[1];
     this.hzPerBin = hzPerBin;
     this.prev = new Float32Array(this.binCount);
+    // Flux is resampled onto fixed ticks of 1/frameRate so a 120 Hz or 30 Hz display measures the same tempo.
+    this.tick = 1 / frameRate;
     this.fluxRing = new Float32Array(Math.max(8, Math.round(frameRate)));
     this.tempoRing = new Float32Array(Math.max(32, Math.round(frameRate * 4)));
     this.minLag = Math.floor(frameRate * 60 / 180);
@@ -35,6 +37,7 @@ export class AudioFeatures {
     this.prev.fill(0);
     this.fluxRing.fill(0); this.fluxPos = 0; this.fluxFilled = 0;
     this.tempoRing.fill(0); this.tempoPos = 0; this.tempoFilled = 0;
+    this.tickAcc = 0; this.pendingFlux = 0;
     this.floor = 0; this.ceil = 0.15;
     this.sinceOnset = 1;
     this.acfTimer = 0; this.cRaw = 0; this.windowMean = 0;
@@ -89,17 +92,15 @@ export class AudioFeatures {
     for (let i = 0; i < filled; i++) { mean += ring[i]; sq += ring[i] * ring[i]; }
     mean /= filled; const variance = Math.max(0, sq / filled - mean * mean);
     const thr = mean + 1.5 * Math.sqrt(variance);
-    ring[this.fluxPos] = flux; this.fluxPos = (this.fluxPos + 1) % n; if (this.fluxFilled < n) this.fluxFilled++;
     if (this.fluxFilled >= 8 && flux > thr && thr > 0 && this.sinceOnset >= 0.1) {
       this.onset = Math.min(1, (flux - thr) / thr); this.sinceOnset = 0;
     } else this.onset = 0;
+    this.pushFlux(flux, dt);
 
-    // Tempo ring (4 s) and periodic autocorrelation.
-    const tr = this.tempoRing;
-    tr[this.tempoPos] = flux; this.tempoPos = (this.tempoPos + 1) % tr.length; if (this.tempoFilled < tr.length) this.tempoFilled++;
+    // Periodic autocorrelation over the 4 s tempo ring.
     this.acfTimer += dt;
-    if (this.acfTimer >= 0.5 && this.tempoFilled >= tr.length) { this.acfTimer = 0; this.estimateTempo(); }
-    this.quiet = this.windowMean < 0.002;
+    if (this.acfTimer >= 0.5 && this.tempoFilled >= this.tempoRing.length) { this.acfTimer = 0; this.estimateTempo(); }
+    this.quiet = this.windowMean < 0.001;
     this.C = this.quiet ? blend(this.C, 0, dt, 3) : blend(this.C, this.cRaw, dt, 3);
 
     // Speech-likeness: 2–8 Hz modulation of the voice band relative to its mean.
@@ -123,11 +124,25 @@ export class AudioFeatures {
     this.speech = blend(this.speech, 0, dt, 0.3);
     this.mod2 = blend(this.mod2, 0, dt, 1); this.vMean = blend(this.vMean, 0, dt, 1);
     this.lp8 = blend(this.lp8, 0, dt, 1 / (TAU * 8)); this.lp2 = blend(this.lp2, 0, dt, 1 / (TAU * 2));
-    const tr = this.tempoRing;
-    tr[this.tempoPos] = 0; this.tempoPos = (this.tempoPos + 1) % tr.length; if (this.tempoFilled < tr.length) this.tempoFilled++;
+    this.pushFlux(0, dt);
     this.windowMean = blend(this.windowMean, 0, dt, 1);
     this.quiet = true;
     return this;
+  }
+
+  // Resample flux onto fixed ticks: the peak since the last tick goes in, extra ticks (slow frames) get zeros.
+  pushFlux(flux, dt) {
+    this.pendingFlux = Math.max(this.pendingFlux, flux);
+    this.tickAcc += dt;
+    let first = true;
+    while (this.tickAcc >= this.tick - 1e-9) {
+      this.tickAcc -= this.tick;
+      const v = first ? this.pendingFlux : 0;
+      const ring = this.fluxRing; ring[this.fluxPos] = v; this.fluxPos = (this.fluxPos + 1) % ring.length; if (this.fluxFilled < ring.length) this.fluxFilled++;
+      const tr = this.tempoRing; tr[this.tempoPos] = v; this.tempoPos = (this.tempoPos + 1) % tr.length; if (this.tempoFilled < tr.length) this.tempoFilled++;
+      first = false;
+    }
+    if (!first) this.pendingFlux = 0;
   }
 
   estimateTempo() {

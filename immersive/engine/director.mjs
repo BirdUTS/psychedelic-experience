@@ -81,7 +81,7 @@ export class Director {
     }
 
     // 4. World clock: ahead of the beat when leading, behind when following.
-    this.world.update(dt, { musicPhase: this.beat.phase, C, I, omega: lead.omega });
+    this.world.update(dt, { musicPhase: this.beat.phase, C, I, omega: lead.omega, musicHz: this.beat.bpm / 60 });
     const pulse = this.world.pulse();
 
     // 5. Phrase boundaries: 16 beats in a groove, 20 s of wall time otherwise.
