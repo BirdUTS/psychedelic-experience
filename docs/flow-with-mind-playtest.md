@@ -1,0 +1,68 @@
+# Flow with Mind — how to start, what to try, what was tested
+
+Branch `flow-with-mind`. Design: `docs/superpowers/specs/2026-10-19-flow-with-mind-design.md`. Plan: `docs/superpowers/plans/2026-10-19-flow-with-mind.md`.
+
+## Start
+
+```bash
+python3 scripts/serve_worlds.py --port 8766
+```
+
+Open http://127.0.0.1:8766/immersive/ in Chrome (if 8766 is already taken by an older server, pass another port such as `--port 8767`). The first click or key press starts sound (browser autoplay policy); the HUD says `tap to start sound` until then.
+
+JEV (optional, online): the server reads `TYPESAFE_API_KEY` from the environment, else from the existing AI Lab `.env`. Without a key the JEV button reports "not configured" and the local director carries on.
+
+Offline: press **Download offline assets** once (≈13 MB: engine + three demos). After that the page opens and runs with the server stopped or the network off.
+
+## What you are looking at
+
+- **Initiative slider** `Lead me ◀━▶ Follow me`. On **Auto** the thumb moves by itself: the world yields when you act (clap, speak, drag) and resumes leading when you rest. Touch it to lock. **Pass the lead** flips the baseline between leading and following.
+- **HUD** (bottom): `LEADING +0.30 · 120 BPM · C 0.82 · E 0.45 · room on · LOCAL DIRECTOR`. C is beat coherence, E is energy. The dot beside the meters pulses on the *world's* beat, which runs ahead of the music when leading and behind when following.
+- **Explain** (top right): which of you / arc / JEV / music is steering each axis, the entropy target and channel, the phase offset in ms, latency compensation, the novelty budget, and Life's pure/variant state.
+- **Arc**: Tidal → Firefly → Mycelium chain by default (each ~4.5–5 min, with its own clock that pauses while you act). Pin one to loop it.
+- **Room mic** runs alongside the music player; it is analysed locally and never recorded or routed to the speakers.
+
+## Playtest script (spec §10)
+
+1. Start the demo playlist (auto-advance and loop are on) with the room mic on. Do nothing for three minutes. Can you *see* the world leading: pulses just ahead of the beat, the arc moving, a scene change landing on a phrase after a track change?
+2. Clap twice; say a sentence. Does the slider drop toward Follow within two seconds, then drift back over ~20 s? Try with headphones and with speakers: with speakers the music itself must not count as you.
+3. Drag the slider to Follow and lock it. For a minute the world must never change scene or symmetry on its own.
+4. Lock a scene, set Lead. The arc should keep moving everything except the scene.
+5. Toggle JEV on with network, then turn Wi-Fi off. The HUD should switch to `LOCAL DIRECTOR` within two seconds with no jump.
+6. Download offline assets, quit the server, reopen the page. It should run with the demo tracks.
+7. A/B: in the Explain panel the phase offset is shown in ms. Lock Initiative at +1 and then at −1 on the same track: which one feels like it is driving?
+
+## Tested by machine (node:test + unittest, all green)
+
+`node --test tests/*.test.mjs tests/*.test.cjs` → 71 tests. `python3 -m unittest scripts/test_serve_worlds.py` → 3 tests.
+
+Covered: adaptive loudness never amplifies a quiet room; onsets, tempo and coherence on click trains at 60 and 120 Hz display rates and across a 76→108 BPM jump; null frames decay without NaN; speech-likeness; beat clock lock within 4 s, latency compensation, world clock lead/lag by ±0.12 cycle and frequency entrainment; agency from off-beat onsets / speech / surprise / gestures with on-beat onsets discounted; initiative yield < 2 s and resume in 15–25 s, hard lock; the three arcs' shapes, interpolation, pause, hold, override, chaining; director scene gate (dwell, phrase boundary, agency, locks), blocked requests not stalling the arc, novelty budget ≤ 3/min, flow channel, phrase boundaries (16 beats / 20 s), dt spikes, JEV low-confidence fallback to the preset, user symmetry as a floor, steady grooves not counted as agency; JEV client validation, staleness, backoff; feedback mix never reaching white; palettes; simulation parameters, injections, Life pure mode and glider seeding; playlist; server questions, state validation and answer mapping.
+
+## Tested by hand on this Mac (2026-10-20)
+
+The Claude desktop app's browser pane throttles animation to ~0–1 fps while hidden, so the live checks drove the app deterministically through `window.__flow.advance(seconds)` (the same frame function the animation loop calls) and read the HUD and engine state:
+
+- Page loads with no console errors; HUD reads `tap to start sound` before the first gesture.
+- Synthetic beat: coherence 0.77–0.95 at 120 BPM within 8 s; phase dot pulses.
+- Initiative locked at −1 for 60 s: no scene change, no symmetry change, HUD `FOLLOWING −1.00`. Auto on: back to +0.30 in ~25 s. A gesture burst dropped it to −0.19 within 2 s and it recovered.
+- Auto scene change physarum → swarm granted exactly once, on a phrase boundary, after the dwell. Lock scene + Lead: scene held 70 s while parameters kept moving.
+- Room mic denied (the pane blocks capture): status names the fallback, HUD `room off`, page keeps running.
+- Kaleidoscope 8-fold visible; 60 s of swarm at maximum feedback left trails without white-out.
+- Forward flight: boids stayed within z ∈ [−24, 4] (re-spawn ahead works); physarum tunnel built with the arc's 8-fold; Life pure mode shows zero perturbations and 5 generations/beat.
+- JEV: a real decision came back in 3.9 s and was applied (energy/symmetry/palette targets, hold 58 % slowed the arc to 0.42×, low-confidence entropy/initiative left local). Invalid state → 400. A free-form request ("make it dreamier") was classified `none`; "make it dreamier and slower" → `slower`.
+- Offline: after downloading assets, with the server stopped, the page reopened from the service worker with the engine running and the three demos listed.
+
+## Not tested (needs a person or a device)
+
+- Real playback on screen at 60/120 fps and the *feel* of the ±60 ms phase offset (script item 7).
+- A real room microphone with speakers: whether the on-beat discount keeps the music from counting as agency.
+- Wi-Fi off while JEV is on (the pane cannot force `navigator.onLine`).
+- Quest 2: the WebXR entry is unchanged and unverified. Post-processing is skipped while presenting in XR.
+- Speech recognition (Web Speech, single utterance) in a real browser.
+- Long runs (an hour or more) for drift, memory and heat.
+
+## Tuning notes for the first play
+
+- Physarum on the sphere reads bright with the silk palette; the tunnel in flight reads well. Gain is in `engine/post.mjs` (`gain`), trail lightness in `app.mjs` (`renderWorld`).
+- Swarmalators at low entropy collapse into a tight ball; the Tidal arc's second half and Firefly loosen it. If it bores, raise the arcs' early `H`.
+- Agency weights (`engine/agency.mjs`): gestures alone yield to about −0.35, speech or claps to about −0.7.
