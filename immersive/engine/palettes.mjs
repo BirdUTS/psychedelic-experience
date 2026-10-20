@@ -9,11 +9,11 @@ export const PALETTES = {
 };
 const wrap = x => ((x % 1) + 1) % 1;
 const clamp01 = v => v < 0 ? 0 : v > 1 ? 1 : v;
-export function paletteHSL(mode, hueCenter, t, v) {
+export function paletteHSL(mode, hueCenter, t, v, sat = 1) {
   const p = PALETTES[mode] || PALETTES.neon;
   const h = wrap((p.center ?? hueCenter) + (clamp01(t) - 0.5) * p.spread);
   const l = p.light[0] + clamp01(v) * (p.light[1] - p.light[0]);
-  return [h, p.sat, l];
+  return [h, Math.min(1, p.sat * (Number.isFinite(sat) ? Math.max(0, sat) : 1)), l];
 }
 export function hslToRgb(h, s, l) {
   if (s === 0) return [l, l, l];
@@ -23,13 +23,13 @@ export function hslToRgb(h, s, l) {
 }
 // Lookup table for per-pixel colouring: index = round(v·(size−1)) with t = v, one table per (mode, hue degree).
 const lutCache = new Map();
-export function paletteLUT(mode, hueCenter, size = 256) {
-  const key = `${mode}:${Math.round(wrap(hueCenter) * 360) % 360}:${size}`;
+export function paletteLUT(mode, hueCenter, size = 256, sat = 1) {
+  const key = `${mode}:${Math.round(wrap(hueCenter) * 360) % 360}:${size}:${Math.round(sat * 100)}`;
   let lut = lutCache.get(key);
   if (lut) return lut;
   lut = new Uint8Array(size * 3);
   for (let i = 0; i < size; i++) {
-    const v = i / (size - 1), [h, s, l] = paletteHSL(mode, hueCenter, v, v), [r, g, b] = hslToRgb(h, s, l);
+    const v = i / (size - 1), [h, s, l] = paletteHSL(mode, hueCenter, v, v, sat), [r, g, b] = hslToRgb(h, s, l);
     lut[i * 3] = Math.round(r * 255); lut[i * 3 + 1] = Math.round(g * 255); lut[i * 3 + 2] = Math.round(b * 255);
   }
   if (lutCache.size > 64) lutCache.clear();

@@ -1,0 +1,8 @@
+import {test} from 'node:test'; import assert from 'node:assert/strict';
+import {depthToAxes} from '../immersive/engine/depth.mjs';
+import {Gestures} from '../immersive/engine/gestures.mjs';
+import {paletteHSL} from '../immersive/engine/palettes.mjs';
+test('depth bundles four axes',()=>{assert.deepEqual(depthToAxes(0),{fold:0,feedback:.1,saturation:.6,speed:.6});const one=depthToAxes(1);assert.equal(one.fold,8);assert(Math.abs(one.feedback-.9)<1e-9&&Math.abs(one.saturation-1.4)<1e-9&&Math.abs(one.speed-1.6)<1e-9);assert.equal(depthToAxes(.5).fold,4)});
+test('saturation multiplier is applied and clamped',()=>{assert(Math.abs(paletteHSL('silk',.3,.5,.5,1.4)[1]-Math.min(1,.45*1.4))<1e-9);assert.equal(paletteHSL('neon',.3,.5,.5,1.4)[1],1)});
+test('tap, drag, swipe, long-press and two-finger are told apart',()=>{const g=new Gestures();assert.equal(g.down(1,100,100,0),null);assert.deepEqual(g.up(1,102,101,120),{type:'tap',x:102,y:101});g.down(1,100,100,1000);const d=g.move(1,130,100,1100);assert.equal(d.type,'drag');assert.equal(d.dx,30);assert.equal(g.up(1,130,100,1900),null);g.down(1,100,100,3000);g.move(1,200,100,3080);assert.deepEqual(g.up(1,220,102,3120),{type:'swipe',dir:'right'});g.down(1,100,100,5000);assert.equal(g.tick(5500),null);assert.deepEqual(g.tick(5700),{type:'longpress',x:100,y:100});g.up(1,100,100,5800);g.down(1,100,100,7000);g.down(2,200,100,7050);assert.deepEqual(g.up(1,100,100,7150),{type:'twofinger'});g.up(2,200,100,7160)});
+test('slow drag is steering, not a swipe',()=>{const g=new Gestures();g.down(1,100,100,0);for(let i=1;i<=20;i++)g.move(1,100+i*6,100,i*60);assert.equal(g.up(1,220,100,1260),null)});
