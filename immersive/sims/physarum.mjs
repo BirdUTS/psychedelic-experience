@@ -17,8 +17,15 @@ export class Physarum {
     this.sensorAngle = 0.55; this.sensorScale = 1; this.speedScale = 1; this.decayRate = 1.4;
     this.active = count; this.injected = null; this.clock = 0;
     this.activity = 0; this.driftSnap = new Float32Array(size * size); this.driftSteps = 0;
+    this.burstMul = 1; this.breath = null; this.effectiveSensorAngle = this.sensorAngle;
     this.reset(seed);
   }
+  // Structural events driven by the music (v2 §3.4).
+  food(x, y, seconds = 12) { this.injected = { x, y, until: this.clock + seconds }; }
+  get foodPoint() { return this.injected; }
+  burst(multiplier = 3) { this.burstMul = multiplier; }
+  breathe(delta, beats, beatSeconds = 0.5) { this.breath = { delta, start: this.clock, until: this.clock + beats * beatSeconds }; }
+  state() { return [this.field, this.agents]; }
   reset(seed = 12) {
     this.random = seeded(seed); this.field.fill(0); this.next.fill(0);
     for (let i = 0; i < this.count; i++) {
@@ -31,9 +38,7 @@ export class Physarum {
     if (T !== undefined) { this.sensorScale = 0.6 + 0.8 * T; this.speedScale = 0.6 + 0.8 * T; }
     if (D !== undefined) this.active = Math.max(1, Math.round(this.count * (0.3 + 0.7 * D)));
   }
-  inject(random = Math.random) {
-    this.injected = { x: random(), y: random(), until: this.clock + 8 };
-  }
+  inject(random = Math.random) { this.food(random(), random(), 8); }
   sense(x, y, a, d) {
     const n = this.size;
     return this.field[((Math.floor(y + Math.sin(a) * d) % n + n) % n) * n + (Math.floor(x + Math.cos(a) * d) % n + n) % n];
@@ -41,18 +46,22 @@ export class Physarum {
   step(dt, energy = 0, attractor = null) {
     this.clock += dt;
     if (this.injected && this.clock > this.injected.until) this.injected = null;
+    if (this.breath && this.clock > this.breath.until) this.breath = null;
+    const breath = this.breath ? this.breath.delta * (this.breath.until - this.clock) / Math.max(1e-6, this.breath.until - this.breath.start) : 0;
+    this.effectiveSensorAngle = this.sensorAngle + breath;
+    const deposit = 0.25 * this.burstMul; this.burstMul = 1;
     const pull = attractor || this.injected;
     const n = this.size, p = this.agents, step = dt * 30, d = (7 + energy * 4) * this.sensorScale;
-    const turn = this.sensorAngle, speed = (1.15 + energy * 0.6) * this.speedScale, end = this.active * 3;
+    const turn = this.effectiveSensorAngle, speed = (1.15 + energy * 0.6) * this.speedScale, end = this.active * 3;
     for (let i = 0; i < end; i += 3) {
       let x = p[i], y = p[i + 1], a = p[i + 2];
       const f = this.sense(x, y, a, d), l = this.sense(x, y, a - turn, d), r = this.sense(x, y, a + turn, d);
       if (f < l || f < r) a += (l > r ? -0.36 : l < r ? 0.36 : (this.random() - 0.5) * 0.7) * step;
-      if (pull) { const target = Math.atan2(pull.y * n - y, pull.x * n - x); a += Math.atan2(Math.sin(target - a), Math.cos(target - a)) * 0.025 * step; }
+      if (pull) { const target = Math.atan2(pull.y * n - y, pull.x * n - x); a += Math.atan2(Math.sin(target - a), Math.cos(target - a)) * 0.06 * step; }   // strong enough to see the chase
       x = (x + Math.cos(a) * speed * step + n) % n; y = (y + Math.sin(a) * speed * step + n) % n;
       p[i] = x; p[i + 1] = y; p[i + 2] = a;
       const k = Math.floor(y) * n + Math.floor(x);
-      this.field[k] = Math.min(16, this.field[k] + 0.25 * step);
+      this.field[k] = Math.min(16, this.field[k] + deposit * step);
     }
     const decay = Math.exp(-dt * this.decayRate);
     for (let y = 0; y < n; y++) for (let x = 0; x < n; x++) {

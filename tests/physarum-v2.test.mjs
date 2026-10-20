@@ -1,0 +1,5 @@
+import {test} from 'node:test'; import assert from 'node:assert/strict';
+import {Physarum} from '../immersive/sims/physarum.mjs';
+test('a burst deposits more than a normal step',()=>{const a=new Physarum(32,200,3),b=new Physarum(32,200,3);const sum=s=>s.field.reduce((x,y)=>x+y,0);a.step(1/30,.4);b.burst(3);b.step(1/30,.4);assert(sum(b)>sum(a)*1.5)});
+test('food pulls headings toward it',()=>{const s=new Physarum(32,400,3);s.food(.9,.5,10);for(let i=0;i<60;i++)s.step(1/30,.4);let toward=0;for(let i=0;i<s.active;i++){const x=s.agents[i*3],y=s.agents[i*3+1],a=s.agents[i*3+2];const target=Math.atan2(.5*32-y,.9*32-x);const d=Math.abs(Math.atan2(Math.sin(target-a),Math.cos(target-a)));if(d<Math.PI/2)toward++}assert(toward>s.active*.6,`toward ${toward}/${s.active}`);assert(s.foodPoint);for(let i=0;i<400;i++)s.step(1/30,.4);assert.equal(s.foodPoint,null)});
+test('breathe offsets the sensor angle and decays back',()=>{const s=new Physarum(16,10,1);const base=s.sensorAngle;s.breathe(.3,4,.5);s.step(1/30,0);assert(Math.abs(s.effectiveSensorAngle-(base+.3))<.05);for(let i=0;i<70;i++)s.step(1/30,0);assert(Math.abs(s.effectiveSensorAngle-base)<.02)});
