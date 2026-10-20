@@ -35,6 +35,30 @@ export class Life {
       if (!cells[i]) { cells[i] = 1; this.grid.age[i] = 1; this.perturbations++; }
     }
   }
+  // v2 §3.4 structural events (labelled creative variants, off under pure rules).
+  seedEdgeGlider(random = Math.random) {
+    if (this.pure) return false;
+    const n = this.size, cells = this.grid.cells, side = Math.floor(random() * 4), along = 1 + Math.floor(random() * (n - 5));
+    const ox = side === 0 ? 1 : side === 1 ? n - 4 : along, oy = side === 2 ? 1 : side === 3 ? n - 4 : along;
+    const flipX = side === 1, flipY = side === 3;
+    for (const [gx, gy] of GLIDER) {
+      const x = ox + (flipX ? 2 - gx : gx), y = oy + (flipY ? 2 - gy : gy), i = y * n + x;
+      cells[i] = 1; this.grid.age[i] = 1;
+    }
+    this.perturbations += GLIDER.length;
+    return true;
+  }
+  stripe(axis = 'x', random = Math.random) {
+    if (this.pure) return false;
+    const n = this.size, cells = this.grid.cells, index = Math.floor(random() * n);
+    let born = 0;
+    for (let k = 0; k < n; k++) {
+      const i = axis === 'x' ? index * n + k : k * n + index;
+      if (random() < 0.3 && !cells[i]) { cells[i] = 1; this.grid.age[i] = 1; born++; }
+    }
+    this.perturbations += born;
+    return true;
+  }
   inject(random = Math.random) {
     if (this.pure) return false;
     const n = this.size, cells = this.grid.cells;

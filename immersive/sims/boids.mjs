@@ -10,8 +10,17 @@ export class Boids {
     this.alignWeight = 0.8; this.separationWeight = 1.4; this.wander = 0; this.speedScale = 1;
     this.active = count; this.repeller = null; this.clock = 0;
     this.activity = 0; this.steps = 0; this.centroid = new Float32Array(3); this.centroidOld = new Float32Array(3);
+    this.wind = { x: 0, y: 0, z: 0 }; this.heightTarget = 0; this.travel = false;
     this.reset(seed);
   }
+  // Structural events driven by the music (v2 §3.4) and the ship's travel wrap (v2 §4.2).
+  turnWind(degrees) {
+    const a = degrees * Math.PI / 180, c = Math.cos(a), s = Math.sin(a), { x, z } = this.wind;
+    this.wind.x = x * c - z * s; this.wind.z = x * s + z * c;
+  }
+  gust(degrees, random = Math.random) { this.turnWind((random() < 0.5 ? -1 : 1) * degrees); }
+  targetHeight(y) { this.heightTarget = Number.isFinite(y) ? y : 0; }
+  state() { return [this.p, this.v]; }
   reset(seed = 42) {
     const r = seeded(seed); this.random = r;
     for (let i = 0; i < this.p.length; i++) { this.p[i] = (r() - 0.5) * 22; this.v[i] = (r() - 0.5) * 2; }
@@ -46,6 +55,8 @@ export class Boids {
         if (attractor) f += ((k === 0 ? attractor.x * 16 - 8 : k === 1 ? 8 - attractor.y * 16 : 0) - p[b + k]) * 0.1;
         if (rep) { const r = [rep.x, rep.y, rep.z]; const dd = Math.hypot(p[b] - rep.x, p[b + 1] - rep.y, p[b + 2] - rep.z); if (dd < 6) f += (p[b + k] - r[k]) / Math.max(0.3, dd) * 4; }
         if (this.wander) f += (this.random() - 0.5) * this.wander;
+        f += k === 0 ? this.wind.x : k === 1 ? this.wind.y : this.wind.z;
+        if (k === 1 && this.heightTarget) f += (this.heightTarget - this.centroid[1]) * 0.2;
         const near = Math.hypot(p[b], p[b + 1], p[b + 2]);
         if (near < 2) f += p[b + k] / Math.max(0.1, near) * 3;
         this.next[b + k] = v[b + k] + f * dt;
@@ -56,6 +67,7 @@ export class Boids {
     const end = n * 3;
     let turning = 0, cx = 0, cy = 0, cz = 0;
     for (let i = 0; i < end; i++) { turning += Math.abs(this.next[i] - v[i]); v[i] = this.next[i]; p[i] += v[i] * dt; }
+    if (this.travel) for (let i = 2; i < end; i += 3) if (p[i] > 6) p[i] = -30;   // past the ship: re-enter ahead, x and y kept
     for (let i = 0; i < n; i++) { cx += p[i * 3]; cy += p[i * 3 + 1]; cz += p[i * 3 + 2]; }
     this.centroid[0] = cx / n; this.centroid[1] = cy / n; this.centroid[2] = cz / n;
     if (this.steps % 150 === 0) this.centroidOld.set(this.centroid);   // five seconds at 30 Hz
