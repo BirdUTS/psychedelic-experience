@@ -24,12 +24,32 @@ export class Director {
     this.lastOut = null;
     this.jevSceneRequest = null; this.pendingRequest = null; this.jevAxes = new Set();
     this.appliedArcIndex = -1; this.appliedArcName = null;
+    // Metabolism (v2 §3.2): heat the entropy target when liveliness sinks; rewind when heat is not enough.
+    this.heat = 0; this.heating = false; this.belowSince = null; this.deepSince = null; this.cooldownUntil = 0; this.forceInject = false;
+    this.prevWorldPhase = 0;
   }
 
   acknowledgeScene(name) {
     if (name) this.scene = name;
     this.sceneAge = 0;
     if (this.jevSceneRequest === this.scene) this.jevSceneRequest = null;
+    this.heat = 0; this.heating = false; this.belowSince = null; this.deepSince = null;   // a new world starts with a clean metabolism
+  }
+
+  metabolism(L, dt) {
+    if (typeof L !== 'number' || !Number.isFinite(L)) return false;
+    if (this.clock < this.cooldownUntil) { this.belowSince = null; this.deepSince = null; this.heating = false; this.heat = Math.max(0, this.heat - dt * 0.1); return false; }
+    if (L < 0.35) { if (this.belowSince === null) this.belowSince = this.clock; }
+    else { this.belowSince = null; this.deepSince = null; this.heating = false; this.heat = Math.max(0, this.heat - dt * 0.1); return false; }
+    if (this.clock - this.belowSince < 5) return false;
+    if (!this.heating) { this.heating = true; this.N = Math.max(this.N, 0.5); this.forceInject = true; }
+    this.heat = Math.min(0.4, this.heat + dt * (0.15 / 5));
+    if (L < 0.2) { if (this.deepSince === null) this.deepSince = this.clock; } else this.deepSince = null;
+    if (this.deepSince !== null && this.clock - this.deepSince >= 15) {
+      this.cooldownUntil = this.clock + 30; this.heat = 0; this.heating = false; this.belowSince = null; this.deepSince = null;
+      return true;
+    }
+    return false;
   }
 
   applyDecision(decision) {
@@ -92,6 +112,10 @@ export class Director {
     // 4. World clock: ahead of the beat when leading, behind when following.
     this.world.update(dt, { musicPhase: this.beat.phase, C, I, omega: lead.omega, musicHz: this.beat.bpm / 60 });
     const pulse = this.world.pulse();
+    const beat = this.world.phase < this.prevWorldPhase && this.prevWorldPhase - this.world.phase > 0.5;
+    this.prevWorldPhase = this.world.phase;
+    const accent = (onset > 0.6 && this.beat.distanceToBeat() > 0.3 && C > 0.4) || surprise > 0.7;
+    const rewind = this.metabolism(input.liveliness, dt);
 
     // 5. Phrase boundaries: 16 beats in a groove, 20 s of wall time otherwise.
     let phraseBoundary = false;
@@ -101,8 +125,8 @@ export class Director {
     // 6. Targets: follow (mirror) blended with lead (arc) per axis by λ·weight.
     const w = lead.weight;
     const mix = (follow, leadValue, wk) => { const a = lambda * wk; return follow * (1 - a) + leadValue * a; };
-    const Hf = 0.35 + 0.5 * (1 - C), Tf = 0.6 + 0.9 * E, Df = 0.3 + 0.7 * E;
-    const hTarget = mix(Hf, lead.H, w.H);
+    const Hf = 0.45 + 0.35 * (1 - C), Tf = 0.6 + 0.9 * E, Df = 0.3 + 0.7 * E;
+    const hTarget = Math.min(1, mix(Hf, lead.H, w.H) + this.heat);
     const T = clamp(mix(Tf, lead.T, w.T), 0, 1.5), D = clamp(mix(Df, lead.D, w.D), 0, 1);
     // Feedback: the user's slider is the baseline; the arc moves around it (0.3 is the arcs' neutral value).
     const F = clamp(user.F + lambda * w.F * (lead.F - 0.3), 0, 1);
@@ -130,6 +154,8 @@ export class Director {
     this.N = Math.min(1, this.N + this.noveltyRefill * dt);
     let injection = false;
     if (surprise > 0.5 && this.N >= 0.5 && (1 - lambda) > 0.3) { injection = true; this.N -= 0.5; }
+    if (this.forceInject && this.N >= 0.5) { injection = true; this.N -= 0.5; }   // the metabolism's own kick when heating begins
+    this.forceInject = false;
 
     const request1 = this.pendingRequest; this.pendingRequest = null;
     const src = (axis, leadActive, userTouched) => leadActive ? (this.jevAxes.has(axis) ? 'jev' : 'arc') : (userTouched ? 'you' : 'music');
@@ -137,6 +163,8 @@ export class Director {
       I, lambda, As, phase: this.beat.phase, worldPhase: this.world.phase, pulse, phraseBoundary, surprise,
       targets: { H, T, D, S, F, palette, hue, camera, omega: lead.omega },
       hTarget, hWidth, sceneChange, injection, request: request1,
+      heat: this.heat, rewind, events: { beat, accent, phrase: phraseBoundary },
+      liveliness: typeof input.liveliness === 'number' ? input.liveliness : null,
       hud: {
         leading: I > 0.2 ? 'LEADING' : I < -0.2 ? 'FOLLOWING' : 'MUTUAL',
         bpm: this.beat.bpm, C, E, As, arc: lead.arcName, waypoint: lead.index,

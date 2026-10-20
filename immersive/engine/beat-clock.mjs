@@ -9,6 +9,16 @@ export class BeatClock {
     this.cycles = 0;          // unwrapped internal phase, cycles
     this.phase = 0; this.bpm = 120;
     this.beatIndex = 0; this.wrapped = false; this.lastBeat = 0;
+    this.recent = new Float32Array(8); this.recentPos = 0; this.recentCount = 0;   // beat distance of the last 8 onsets
+  }
+  // Lock quality: the share of recent onsets that landed near the beat. Once at least half do, the clock is
+  // tracking and onsets far from the beat are treated as accents rather than corrections (a gated PLL);
+  // until then every onset corrects it (acquisition).
+  lockQuality() {
+    if (!this.recentCount) return 0;
+    let near = 0;
+    for (let i = 0; i < this.recentCount; i++) if (this.recent[i] < 0.15) near++;
+    return near / this.recentCount;
   }
   get internal() { return wrap(this.cycles); }
   setLatency(seconds) { this.latency = Number.isFinite(seconds) ? Math.max(0, seconds) : 0; }
@@ -17,7 +27,13 @@ export class BeatClock {
     let c = this.cycles + dt * this.bpm / 60;
     // PLL kick toward the nearest beat: at most kappa/(2π) ≈ 0.05 cycle per onset, so off-beat
     // hats nudge rather than yank, and onsets on the beat barely move it.
-    if (onset > 0) c += this.kappa * Math.min(1, onset) * Math.sin(-TAU * wrap(c)) / TAU;
+    if (onset > 0) {
+      const p = wrap(c), dist = p > 0.5 ? 1 - p : p;
+      const gate = this.lockQuality() >= 0.5 ? Math.max(0, 1 - dist / 0.3) : 1;
+      c += this.kappa * Math.min(1, onset) * Math.sin(-TAU * p) / TAU * gate;
+      this.recent[this.recentPos] = dist; this.recentPos = (this.recentPos + 1) % this.recent.length;
+      if (this.recentCount < this.recent.length) this.recentCount++;
+    }
     this.cycles = c;
     const reported = c + this.latency * this.bpm / 60;
     this.phase = wrap(reported);
@@ -39,8 +55,10 @@ export class WorldClock {
   }
   update(dt, { musicPhase = 0, C = 0, I = 0, omega = this.omega, musicHz = null } = {}) {
     if (Number.isFinite(omega)) this.omega = omega;
-    // Frequency entrainment: in a groove the world's own tempo relaxes to the beat's; free-running it keeps omega.
-    const effective = Number.isFinite(musicHz) && musicHz > 0 ? this.omega + (musicHz - this.omega) * C : this.omega;
+    // Frequency entrainment: in a groove the world's own tempo locks to the beat's (fully once C ≥ 0.6);
+    // free-running it keeps omega.
+    const lock = Math.min(1, C / 0.6);
+    const effective = Number.isFinite(musicHz) && musicHz > 0 ? this.omega + (musicHz - this.omega) * lock : this.omega;
     // Advance by the natural frequency first so the pull compares phases at the same instant
     // as the musicPhase supplied for this frame (otherwise a dt·omega bias appears in the offset).
     const predicted = this.phase + dt * effective;
