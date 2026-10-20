@@ -102,8 +102,19 @@ export class Worlds {
 
   paletteColor(palette, hue, sat, t, v) { const [h, s, l] = paletteHSL(palette, hue / 360, t, v, sat); color.setHSL(h, s, l); return color; }
 
-  render({ palette, hue, sat = 1, pulse, simTime, intensity = 0.8 }) {
+  // In flight the cloud or flock is kept on the ship's axis by moving the group, not the simulation:
+  // the rules stay pure, the view stays centred.
+  recentre(dt) {
+    const s = this.sims; let cx = 0, cy = 0, n = 0;
+    if (this.world === 'swarm') { const p = s.swarm.p; n = s.swarm.active; for (let i = 0; i < n; i++) { cx += p[i * 3]; cy += p[i * 3 + 1]; } }
+    else if (this.world === 'boids') { cx = s.boids.centroid[0] * s.boids.active; cy = s.boids.centroid[1] * s.boids.active; n = s.boids.active; }
+    const k = Math.min(1, dt * 1.5), tx = this.mode === 'ship' && n ? -cx / n : 0, ty = this.mode === 'ship' && n ? -cy / n : 0;
+    this.group.position.x += (tx - this.group.position.x) * k; this.group.position.y += (ty - this.group.position.y) * k;
+  }
+
+  render({ palette, hue, sat = 1, pulse, simTime, intensity = 0.8, dt = 1 / 60 }) {
     if (!this.visual) return;
+    this.recentre(dt);
     const s = this.sims, scale = 1 + 0.5 * pulse * intensity, visual = this.visual;
     if (this.world === 'physarum') {
       const field = s.physarum.field, lut = paletteLUT(palette, (hue / 360 + 0.48) % 1, 256, sat), data = this.pixels.data;

@@ -441,7 +441,7 @@ function frame(dt) {
     const speed = ship.speed * (jump ? 3 : 1), dz = speed * dt;
     worlds.stream(dz); worlds.updateStars(speed, 2, ship.mode === 'ship' ? dz : 0);
     snapshotTimer += dt; if (snapshotTimer >= 20 && !dissolving) { snapshotTimer = 0; rings[world].capture(L, simClock); }
-    if (!window.__flow.skipRender) worlds.render({ palette: out.targets.palette, hue: out.targets.hue, sat: axes.saturation, pulse: out.pulse, simTime, intensity: 0.8 });
+    if (!window.__flow.skipRender) worlds.render({ palette: out.targets.palette, hue: out.targets.hue, sat: axes.saturation, pulse: out.pulse, simTime, intensity: 0.8, dt });
     timing.step = t1 - t0; timing.steps = steps; timing.render = performance.now() - t1; timing.dt = dt;
   }
   if (window.__flow.skipRender) { if (now - lastHUD > 0.15) { lastHUD = now; updateHUD(out, frames, L); } return; }

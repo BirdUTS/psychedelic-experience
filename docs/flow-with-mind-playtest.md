@@ -1,5 +1,23 @@
 # Flow with Mind — how to start, what to try, what was tested
 
+## v2 (2026-10-20): metabolism, travel, play surface
+
+Design: `docs/superpowers/specs/2026-10-20-flow-v2-metabolism-travel-play-design.md`. What changed after Bird's first play:
+
+- **The worlds stay alive.** Each world reports a liveliness L (shown on the HUD as `life 0.xx`). Below 0.35 for 5 s the director heats the entropy target (`heat +0.xx` on the HUD) and kicks a structural event; below 0.2 for 15 s more it **rewinds**: the world melts back over 2 s to its most alive snapshot of the last ~80 s (`REWIND` on the HUD, note in the drawer). Music now changes structure: physarum deposits burst on the beat and chase a food point that jumps on accents; swarmalators live in the active phase-wave regime at high entropy and get phase kicks on the beat; boids get gusts and a wind that turns on the phrase; Life seeds edge gliders on accents and stripes on phrases (labelled variants, off under pure rules).
+- **You travel.** The app opens in **hover** (the v1 spheres). **Tap the glass or press Space to launch the ship**: physarum and Life become tunnels, the swarm and the flock stream past you and re-form ahead, stars streak with speed. A sustained musical build with a clear beat pitches the ship into a **dive**; the drop levels it. A scene change is a 4 s **jump** (speed ×3, 8-fold, the old world falls away behind). Long-press the ring, press V, or use the drawer to hover again.
+- **One ring.** The arc at the bottom is Initiative: left *Lead me*, right *Follow me*. On auto the dot drifts by itself; touch it to lock; double-tap it to pass the lead. **Depth** (swipe up/down, + / −) bundles fold, feedback, saturation and speed. Everything else is in the drawer (⚙ or Esc). The HUD and ring fade after 3 s without a touch.
+
+Gestures: tap launch / pulse · drag steer · swipe ← → next / previous world (honoured at the next phrase when the world leads, at once when it follows, never when the scene is locked) · swipe ↑ ↓ depth · long-press hold the world · two-finger tap or shake rewind · pinch or wheel speed trim · long-press the ring hover · double-tap the ring pass the lead. Keys: Space, arrows, [ ], + −, H, R, V, P, Esc.
+
+Tested by machine: `node --test tests/*.test.mjs tests/*.test.cjs` → 117 tests (liveliness, swarm regimes/kicks/wrap, physarum food/burst/breathe, boids wind/wrap, Life variants, snapshot ring and dissolve, metabolism controller, event flags, user scene requests, ship model, depth bundle, gestures). Tested by hand through `window.__flow.advance()` in the app's browser pane: hover default and launch, tunnel build, 4 s jump, swarm wrap bounds in flight, forced low liveliness → heat → rewind → reference reset, drawer and Esc, depth 0/1, ring tap lock, canvas tap launch, swipe → requested world → jump, HUD idle fade; the swarm in flight re-centred on the ship's axis and filled the view; offline assets (33 core files + demos, cache `extra-worlds-v7`) and a reopen with the server stopped (ship launched, demos listed); no console errors; render ≈ 2 ms. **Not tested:** real motion-sickness feel of the ship and dive, shake on a phone, pinch on a touch screen, VR with the ship (VR stays in hover), long runs.
+
+Tuning notes: the dive thresholds (8 s build, C > 0.5), the rewind band (0.35 / 0.2), the arcs' entropy range (0.35–0.75) and the swarm regime mapping (K = 0.6 − H) are the knobs most likely to need Bird's ear.
+
+---
+
+## v1 (2026-10-19)
+
 Branch `flow-with-mind`. Design: `docs/superpowers/specs/2026-10-19-flow-with-mind-design.md`. Plan: `docs/superpowers/plans/2026-10-19-flow-with-mind.md`.
 
 ## Start
