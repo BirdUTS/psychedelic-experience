@@ -16,6 +16,7 @@ export class Physarum {
     this.agents = new Float32Array(count * 3);
     this.sensorAngle = 0.55; this.sensorScale = 1; this.speedScale = 1; this.decayRate = 1.4;
     this.active = count; this.injected = null; this.clock = 0;
+    this.activity = 0; this.driftSnap = new Float32Array(size * size); this.driftSteps = 0;
     this.reset(seed);
   }
   reset(seed = 12) {
@@ -60,5 +61,13 @@ export class Physarum {
       this.next[y * n + x] = (this.field[y * n + x] * 0.25 + sum / 9 * 0.75) * decay;
     }
     [this.field, this.next] = [this.next, this.field];
+    // Activity is structural drift: how much the trail map differs from two seconds ago, relative to its mass.
+    // Per-step churn along fixed trails does not count; a network that stopped re-forming reads near zero.
+    if (++this.driftSteps % 60 === 0) {
+      let d = 0, m = 0;
+      for (let i = 0; i < this.field.length; i++) { d += Math.abs(this.field[i] - this.driftSnap[i]); m += this.field[i]; }
+      this.activity = m > 0 ? d / m : 0;
+      this.driftSnap.set(this.field);
+    }
   }
 }

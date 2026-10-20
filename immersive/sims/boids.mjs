@@ -9,6 +9,7 @@ export class Boids {
     this.p = new Float32Array(count * 3); this.v = new Float32Array(count * 3); this.next = new Float32Array(count * 3);
     this.alignWeight = 0.8; this.separationWeight = 1.4; this.wander = 0; this.speedScale = 1;
     this.active = count; this.repeller = null; this.clock = 0;
+    this.activity = 0; this.steps = 0; this.centroid = new Float32Array(3); this.centroidOld = new Float32Array(3);
     this.reset(seed);
   }
   reset(seed = 42) {
@@ -53,6 +54,13 @@ export class Boids {
       for (let k = 0; k < 3; k++) this.next[b + k] *= speed / len;
     }
     const end = n * 3;
-    for (let i = 0; i < end; i++) { v[i] = this.next[i]; p[i] += v[i] * dt; }
+    let turning = 0, cx = 0, cy = 0, cz = 0;
+    for (let i = 0; i < end; i++) { turning += Math.abs(this.next[i] - v[i]); v[i] = this.next[i]; p[i] += v[i] * dt; }
+    for (let i = 0; i < n; i++) { cx += p[i * 3]; cy += p[i * 3 + 1]; cz += p[i * 3 + 2]; }
+    this.centroid[0] = cx / n; this.centroid[1] = cy / n; this.centroid[2] = cz / n;
+    if (this.steps % 150 === 0) this.centroidOld.set(this.centroid);   // five seconds at 30 Hz
+    this.steps++;
+    const moved = Math.hypot(this.centroid[0] - this.centroidOld[0], this.centroid[1] - this.centroidOld[1], this.centroid[2] - this.centroidOld[2]);
+    this.activity = turning / n + (moved > 1 ? 0.3 : 0);
   }
 }

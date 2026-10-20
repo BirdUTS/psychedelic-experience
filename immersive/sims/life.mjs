@@ -10,8 +10,10 @@ export class Life {
   constructor(size = 64, seed = 1) {
     this.size = size; this.grid = new LifeGrid(size);
     this.pure = false; this.perturbations = 0; this.births = 0; this.generationsPerBeat = 4; this.density = 1;
+    this.activity = 0;
     this.seed(seed);
   }
+  state() { return [this.grid.cells, this.grid.age]; }
   get generation() { return this.grid.generation; }
   seed(seed = 1) { this.random = seeded(seed); this.grid.seed(this.random); this.perturbations = 0; }
   setParams({ H, T, D } = {}) {
@@ -21,8 +23,13 @@ export class Life {
   }
   step() {
     this.grid.step();
+    // After a step the grid's spare buffer still holds the previous generation.
+    const cells = this.grid.cells, previous = this.grid.next;
+    let changed = 0, population = 0;
+    for (let i = 0; i < cells.length; i++) { if (cells[i] !== previous[i]) changed++; population += cells[i]; }
+    this.activity = changed / Math.max(1, population);
     if (this.pure || !this.births) return;
-    const cells = this.grid.cells, n = cells.length;
+    const n = cells.length;
     for (let b = 0; b < this.births; b++) {
       const i = Math.floor(this.random() * n);
       if (!cells[i]) { cells[i] = 1; this.grid.age[i] = 1; this.perturbations++; }
