@@ -32,7 +32,11 @@ export class Physarum {
       const a = this.random() * Math.PI * 2;
       this.agents.set([this.random() * this.size, this.random() * this.size, a], i * 3);
     }
+    this.resync();
   }
+  // After the field is rewritten from outside (rewind, reseed) the drift baseline must follow,
+  // or the next activity sample compares two unrelated maps and inflates the liveliness reference.
+  resync() { if (this.driftSnap) this.driftSnap.set(this.field); }
   setParams({ H, T, D } = {}) {
     if (H !== undefined) { this.sensorAngle = 0.55 * (0.4 + 1.2 * H); this.decayRate = 1.4 * (0.6 + 0.8 * H); }
     if (T !== undefined) { this.sensorScale = 0.6 + 0.8 * T; this.speedScale = 0.6 + 0.8 * T; }

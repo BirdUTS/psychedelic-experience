@@ -63,7 +63,7 @@ function ensureFeatures(sampleRate) {
 ensureFeatures(48000);
 
 let paused = matchMedia('(prefers-reduced-motion: reduce)').matches, simTime = 0, acc = 0, lifeAcc = 0, simClock = 0;
-let depth = 0.5, sceneLocked = false, autoInitiative = true, gestureCount = 0, lastGesture = 0, lastInteraction = 0;
+let depth = 0.5, sceneLocked = false, autoInitiative = true, gestureCount = 0, lastGesture = 0, lastInteraction = Infinity;   // no idle fade before the first touch
 let orbit = 0, pitch = 0.12, zoom = 19, attractor = null, attractorUntil = 0, xrSession = null;
 let dissolving = null, jump = null, snapshotTimer = 0, rewindNote = '', fps = 60;
 const summary = { E30: 0, E5: 0, C30: 0, B30: 0, A30: 0 }, recentDecisions = [];
@@ -87,11 +87,16 @@ function choose(id, { auto = false } = {}) {
   document.querySelectorAll('[data-world]').forEach(b => { const on = b.dataset.world === id; b.classList.toggle('selected', on); b.setAttribute('aria-pressed', String(on)); });
   director.acknowledgeScene(id);
   if (!auto) bump();
-  // A world that was frozen when we left it comes back from its best snapshot.
-  if (liveliness.value(id) < 0.35 && rings[id].count) rewind('return');
+  // A world that was frozen when we left it comes back from its best snapshot (after the jump lands).
+  if (liveliness.value(id) < 0.35 && rings[id].count) { if (jump) jump.rewindOnLand = true; else rewind('return'); }
+}
+function finishDissolve() {
+  if (!dissolving) return;
+  dissolving.ring.update(60, sims[dissolving.id].state(), { discrete: dissolving.id === 'life' ? [0, 1] : [] });
+  sims[dissolving.id].resync?.(); dissolving = null;
 }
 function rewind(reason = 'manual') {
-  if (dissolving || jump) return false;
+  if (dissolving || (jump && reason !== 'return')) return false;
   const sim = sims[world], ring = rings[world];
   if (world === 'life' && sim.pure) { sim.seed(++seed); rewindNote = 'reseeded (pure rules)'; }
   else {
@@ -103,16 +108,21 @@ function rewind(reason = 'manual') {
   $('decision').textContent = rewindNote;
   return true;
 }
-function startJump(next) {
+function startJump(next, { manual = false } = {}) {
   if (jump || !WORLDS[next] || next === world) return;
-  jump = { t: 0, to: next, switched: false };
+  finishDissolve();   // a jump over a half-finished rewind would leave the arriving world frozen
+  if (manual) bump();
+  jump = { t: 0, to: next, switched: false, rewindOnLand: false };
 }
 function updateJump(dt) {
   jump.t += dt;
   if (!jump.switched && jump.t >= 2) { jump.switched = true; choose(jump.to, { auto: true }); }
   const u = jump.t < 2 ? jump.t / 2 : (jump.t - 2) / 2;
   group.scale.set(1, 1, jump.t < 2 ? 1 - 0.9 * u : 0.6 + 0.4 * Math.min(1, u));
-  if (jump.t >= 4 || (jump.switched && world !== jump.to)) { jump = null; group.scale.set(1, 1, 1); }   // never leave a jump hanging
+  if (jump.t >= 4 || (jump.switched && world !== jump.to)) {   // never leave a jump hanging
+    const land = jump.rewindOnLand; jump = null; group.scale.set(1, 1, 1);
+    if (land) rewind('return');
+  }
 }
 function setShipMode(mode) {
   if (mode === 'ship') ship.launch(); else ship.hover();
@@ -146,22 +156,33 @@ function placeDot(I) {
   ringDot.setAttribute('cx', (200 + 170 * Math.cos(theta)).toFixed(1)); ringDot.setAttribute('cy', (100 - 170 * Math.sin(theta)).toFixed(1));
   ringEl.setAttribute('aria-valuenow', I.toFixed(2));
 }
-let ringDrag = false, ringLastTap = 0, ringPressTimer = null;
+// Ring touches: a tap or drag locks Initiative where you touch; a still long-press toggles hover without
+// locking; a double-tap passes the lead. Nothing locks until the finger moves or lifts.
+let ringDrag = null, ringLastTap = 0, ringPressTimer = null;
 ringEl.addEventListener('pointerdown', e => {
-  e.stopPropagation(); try { ringEl.setPointerCapture(e.pointerId); } catch { /* pointer already gone */ } ringDrag = true; touch();
+  e.stopPropagation(); try { ringEl.setPointerCapture(e.pointerId); } catch { /* pointer already gone */ } touch();
   const now = performance.now();
   if (now - ringLastTap < 300) { director.initiative.setBaseline(director.initiative.I0 > 0 ? -0.6 : 0.6); setAuto(true); $('decision').textContent = director.initiative.I0 > 0 ? 'The world takes the lead.' : 'The world follows you.'; ringLastTap = 0; return; }
   ringLastTap = now;
-  ringPressTimer = setTimeout(() => { ringDrag = false; setShipMode(ship.mode === 'ship' ? 'hover' : 'ship'); }, 600);
+  ringDrag = { x: e.clientX, y: e.clientY, moved: false, pressed: false };
+  ringPressTimer = setTimeout(() => { if (ringDrag && !ringDrag.moved) { ringDrag.pressed = true; setShipMode(ship.mode === 'ship' ? 'hover' : 'ship'); } }, 600);
+});
+ringEl.addEventListener('pointermove', e => {
+  if (!ringDrag || ringDrag.pressed) return;
+  if (!ringDrag.moved && Math.hypot(e.clientX - ringDrag.x, e.clientY - ringDrag.y) < 8) return;
+  ringDrag.moved = true; clearTimeout(ringPressTimer);
   director.initiative.lock(ringValueFromEvent(e)); setAuto(false); bump();
 });
-ringEl.addEventListener('pointermove', e => { if (!ringDrag) return; clearTimeout(ringPressTimer); director.initiative.lock(ringValueFromEvent(e)); });
-for (const ev of ['pointerup', 'pointercancel']) ringEl.addEventListener(ev, () => { ringDrag = false; clearTimeout(ringPressTimer); });
+for (const ev of ['pointerup', 'pointercancel']) ringEl.addEventListener(ev, e => {
+  clearTimeout(ringPressTimer);
+  if (ringDrag && !ringDrag.moved && !ringDrag.pressed) { director.initiative.lock(ringValueFromEvent(e)); setAuto(false); bump(); }
+  ringDrag = null;
+});
 ringEl.addEventListener('keydown', e => { if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') { director.initiative.lock(Math.max(-1, Math.min(1, director.initiative.I + (e.key === 'ArrowLeft' ? 0.1 : -0.1)))); setAuto(false); e.preventDefault(); } });
 
 // ---------- gestures on the glass ----------
 const canvas = renderer.domElement;
-let dragging = false;
+let dragging = false, swallowed = null;   // the first touch after the idle fade only wakes the surface
 function act(action) {
   if (!action) return;
   touch();
@@ -183,12 +204,14 @@ function act(action) {
   }
 }
 canvas.addEventListener('pointerdown', e => {
+  if (document.body.classList.contains('idle')) { swallowed = e.pointerId; touch(); return; }
   try { canvas.setPointerCapture(e.pointerId); } catch { /* pointer already gone */ } dragging = true; touch();
   act(gestures.down(e.pointerId, e.clientX, e.clientY, performance.now()));
   gestureCount++;
 });
 canvas.addEventListener('pointermove', e => {
-  if (!dragging) return;
+  if (e.pointerId === swallowed) return;
+  if (!dragging) { if (document.body.classList.contains('idle')) touch(); return; }   // a mouse move wakes the surface
   const a = gestures.move(e.pointerId, e.clientX, e.clientY, performance.now());
   if (a?.type === 'drag') {
     if (ship.mode === 'ship') ship.steer(-a.dx * 0.25, -a.dy * 0.2);
@@ -197,7 +220,10 @@ canvas.addEventListener('pointermove', e => {
     const now = clock.elapsedTime; if (now - lastGesture > 0.1) { gestureCount++; lastGesture = now; }
   } else if (a?.type === 'pinch') act(a);
 });
-for (const ev of ['pointerup', 'pointercancel']) canvas.addEventListener(ev, e => { dragging = false; act(gestures.up(e.pointerId, e.clientX, e.clientY, performance.now())); });
+for (const ev of ['pointerup', 'pointercancel']) canvas.addEventListener(ev, e => {
+  if (e.pointerId === swallowed) { swallowed = null; return; }
+  dragging = false; act(gestures.up(e.pointerId, e.clientX, e.clientY, performance.now()));
+});
 canvas.addEventListener('wheel', e => { e.preventDefault(); touch(); if (ship.mode === 'ship') ship.trim(-e.deltaY * 0.0008); else zoom = Math.max(0.01, Math.min(35, zoom + e.deltaY * 0.008)); }, { passive: false });
 // Shake to rewind (phones): two strong accelerations within 600 ms.
 let shakeAt = 0;
@@ -230,7 +256,7 @@ function toggleDrawer(force) {
 }
 $('gear').onclick = () => toggleDrawer(true); $('closeDrawer').onclick = () => toggleDrawer(false);
 $('hoverToggle').onclick = () => setShipMode(ship.mode === 'ship' ? 'hover' : 'ship');
-document.querySelectorAll('[data-world]').forEach(b => b.onclick = () => { if (!jump) startJump(b.dataset.world); });
+document.querySelectorAll('[data-world]').forEach(b => b.onclick = () => { if (!jump) startJump(b.dataset.world, { manual: true }); });
 function toggleLock(force) {
   sceneLocked = force ?? !sceneLocked;
   $('lockScene').textContent = 'Lock scene: ' + (sceneLocked ? 'on' : 'off'); $('lockScene').setAttribute('aria-pressed', String(sceneLocked));
@@ -238,7 +264,7 @@ function toggleLock(force) {
 }
 $('lockScene').onclick = () => toggleLock();
 $('rewind').onclick = () => rewind('button');
-$('reset').onclick = () => { const s = sims[world]; if (world === 'life') s.seed(++seed); else s.reset(++seed); liveliness.reset(world); bump(); };
+$('reset').onclick = () => { const s = sims[world]; if (world === 'life') s.seed(++seed); else s.reset(++seed); s.resync?.(); liveliness.reset(world); bump(); };
 $('arc').onchange = () => { const v = $('arc').value; if (v === 'auto') { director.arcs.pin(false); $('pinArc').textContent = 'Pin arc: off'; $('pinArc').setAttribute('aria-pressed', 'false'); } else director.arcs.select(v, { pin: $('pinArc').getAttribute('aria-pressed') === 'true' }); bump(); };
 $('pinArc').onclick = () => { const on = $('pinArc').getAttribute('aria-pressed') !== 'true'; director.arcs.pin(on); $('pinArc').textContent = 'Pin arc: ' + (on ? 'on' : 'off'); $('pinArc').setAttribute('aria-pressed', String(on)); };
 $('skin').onchange = () => { if (world === 'boids') worlds.build(world, ship.mode, $('skin').value); };
@@ -428,14 +454,14 @@ function frame(dt) {
   if (out.rewind) rewind('metabolism');
   if (out.sceneChange) startJump(out.sceneChange);
   const energyTrend = summary.E5 - summary.E30;
-  ship.update(dt, { T: out.targets.T, pulse: out.pulse, intensity: 0.8, phraseBoundary: out.phraseBoundary, energyTrend, C: out.hud.C, drop: energyTrend < -0.12 });
-  if (jump) updateJump(dt);
+  if (!paused) ship.update(dt, { T: out.targets.T, pulse: out.pulse, intensity: 0.8, phraseBoundary: out.phraseBoundary, energyTrend, C: out.hud.C, drop: energyTrend < -0.12 });
+  if (jump && !paused) updateJump(dt);
   const axes = depthToAxes(depth);
   if (!paused) {
     const step = dt * axes.speed * (0.5 + out.targets.T);
     simTime += step; acc += step;
     const t0 = performance.now(); let steps = 0;
-    if (dissolving) { if (dissolving.ring.update(dt, sims[dissolving.id].state(), { discrete: dissolving.id === 'life' ? [0, 1] : [] }) >= 1) dissolving = null; acc = 0; }
+    if (dissolving) { if (dissolving.ring.update(dt, sims[dissolving.id].state(), { discrete: dissolving.id === 'life' ? [0, 1] : [] }) >= 1) { sims[dissolving.id].resync?.(); dissolving = null; } acc = 0; }
     else while (acc >= 1 / 30) { stepSims(1 / 30, out); acc -= 1 / 30; steps++; }
     const t1 = performance.now();
     const speed = ship.speed * (jump ? 3 : 1), dz = speed * dt;
@@ -451,7 +477,11 @@ function frame(dt) {
     else { const a = orbit + simTime * 0.025; camera.position.set(Math.sin(a) * zoom, Math.sin(pitch) * zoom, Math.cos(a) * zoom); camera.lookAt(0, 0, 0); }
   }
   if (renderer.xr.isPresenting) renderer.render(scene, camera);
-  else post.render(scene, camera, { fold: jump ? 8 : out.targets.S, feedback: Math.min(1, out.targets.F + (jump ? 0.3 : 0)), pulse: out.pulse, dt, fadeSeconds: Math.min(8, 16 * 60 / Math.max(60, out.hud.bpm)) });
+  else {
+    // The jump forces 8-fold with a 1 s fade so the fold completes before the switch back; a dive adds one fold step and more feedback.
+    const diveFold = ship.diving ? Math.min(8, out.targets.S + 2) : out.targets.S;
+    post.render(scene, camera, { fold: jump ? 8 : diveFold, feedback: Math.min(1, out.targets.F + (jump ? 0.3 : 0) + (ship.diving ? 0.2 : 0)), pulse: out.pulse, dt, fadeSeconds: jump || ship.diving ? 1 : Math.min(8, 16 * 60 / Math.max(60, out.hud.bpm)) });
+  }
   if (now - lastHUD > 0.15) { lastHUD = now; updateHUD(out, frames, L); }
   if (!$('explain').hidden && now - lastExplain > 0.5) { lastExplain = now; updateExplain(out, L); }
 }
@@ -468,7 +498,7 @@ function updateHUD(out, frames, L) {
   if (ship.mode === 'hover') line += ' · tap to launch';
   if (!sound && !audio.synthetic) line += ' · tap to start sound';
   else if (frames.music) line += ` · ${Math.round(out.hud.bpm)} BPM · C ${out.hud.C.toFixed(2)}`;
-  line += ` · life ${L.toFixed(2)}` + (out.heat > 0 ? ` · heat +${out.heat.toFixed(2)}` : '') + (dissolving ? ' · REWIND' : '') + (jump ? ' · JUMP' : '');
+  line += ` · life ${L.toFixed(2)}` + (out.heat > 0 ? ` · heat +${out.heat.toFixed(2)}` : '') + (dissolving ? ' · REWIND' : '') + (jump ? ' · JUMP' : '') + (ship.diving ? ' · DIVE' : '') + (paused ? ' · PAUSED' : '');
   line += navigator.onLine && jev.enabled ? ' · JEV' : ' · LOCAL';
   $('hud').textContent = line;
 }
@@ -523,4 +553,5 @@ addEventListener('pagehide', () => { recognition?.stop(); player.pause(); audio.
 
 // ---------- start ----------
 choose(world); setAuto(true); setShipMode('hover'); placeDot(director.initiative.I); setDepth(depth);
+lastInteraction = Infinity; document.body.classList.remove('idle');   // nothing fades before the first real touch
 renderer.setAnimationLoop(animate);

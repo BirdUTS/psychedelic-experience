@@ -24,7 +24,9 @@ export class Boids {
   reset(seed = 42) {
     const r = seeded(seed); this.random = r;
     for (let i = 0; i < this.p.length; i++) { this.p[i] = (r() - 0.5) * 22; this.v[i] = (r() - 0.5) * 2; }
+    this.resync();
   }
+  resync() { if (this.centroidOld) { this.centroidOld.set(this.centroid); } }
   setParams({ H, T, D } = {}) {
     if (H !== undefined) { this.alignWeight = 0.8 * (1.5 - H); this.separationWeight = 1.4 * (0.5 + H); this.wander = Math.max(0, 2 * (H - 0.5)); }
     if (T !== undefined) this.speedScale = 0.6 + 0.8 * T;

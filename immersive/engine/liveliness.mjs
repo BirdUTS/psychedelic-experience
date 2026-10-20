@@ -12,7 +12,7 @@ export class Liveliness {
   }
   state(world) {
     let s = this.worlds.get(world);
-    if (!s) { s = { smoothed: 0, ref: 0, age: Infinity, has: false }; this.worlds.set(world, s); }
+    if (!s) { s = { smoothed: 0, ref: 0, age: 0, has: false }; this.worlds.set(world, s); }   // first observation starts the reference window
     return s;
   }
   reset(world) { const s = this.state(world); s.smoothed = 0; s.ref = 0; s.age = 0; s.has = false; }

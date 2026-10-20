@@ -17,7 +17,7 @@ export class Ship {
   hover() { this.mode = 'hover'; this.diving = false; this.buildFor = 0; }
   toggle() { if (this.mode === 'ship') this.hover(); else this.launch(); }
   trim(delta) { this.trimValue = clamp(this.trimValue + (Number.isFinite(delta) ? delta : 0), 0.5, 1.5); }
-  steer(dyaw, dpitch) { this.steerYaw += dyaw || 0; this.steerPitch += dpitch || 0; }
+  steer(dyaw, dpitch) { this.steerYaw += dyaw || 0; this.steerPitch = clamp(this.steerPitch + (dpitch || 0), -60, 60); }
   get maxSpeed() { return 3 * (this.base + this.perT); }
   update(dt, { T = 0.5, pulse = 0, intensity = 0.8, phraseBoundary = false, energyTrend = 0, C = 0, drop = false } = {}) {
     if (!(dt > 0)) return this;
@@ -46,7 +46,7 @@ export class Ship {
     this.steerYaw *= decay; this.steerPitch *= decay;
     const step = this.maxTurnRate * dt, prevYaw = this.yaw;
     this.yaw = approach(this.yaw, this.steerYaw, step);
-    this.pitch = approach(this.pitch, this.steerPitch + (this.diving ? -this.divePitch : 0), step);
+    this.pitch = approach(this.pitch, clamp(this.steerPitch + (this.diving ? -this.divePitch : 0), -60, 60), step);   // never near the Euler flip
     this.heading = approach(this.heading, this.headingTarget + wander, step);
     const rollTarget = flying ? clamp(-((this.yaw - prevYaw) / dt) * 0.6, -this.maxRoll, this.maxRoll) : 0;
     this.roll = approach(this.roll, rollTarget, step);

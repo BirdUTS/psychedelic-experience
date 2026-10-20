@@ -59,8 +59,9 @@ export class PostFX {
   render(scene, camera, { fold = 0, feedback = 0, pulse = 0, dt = 1 / 60, fadeSeconds = 2 } = {}) {
     const r = this.renderer, u = this.uniforms;
     if (fold !== this.fold) {
-      // Start a cross-fade from whatever is on screen now toward the new fold count.
-      this.foldPrev = this.foldMix >= 1 ? this.fold : this.foldPrev; this.fold = fold; this.foldMix = 0;
+      // Start a cross-fade from the fold we were heading to toward the new one; a mid-fade change
+      // promotes the current target so a half-visible fold never vanishes in one frame.
+      this.foldPrev = this.fold; this.fold = fold; this.foldMix = 0;
     }
     this.foldMix = Math.min(1, this.foldMix + dt / Math.max(0.1, fadeSeconds));
     const previousTarget = r.getRenderTarget();

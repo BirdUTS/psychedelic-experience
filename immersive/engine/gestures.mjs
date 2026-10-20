@@ -1,8 +1,8 @@
 /* Gesture mapper (v2 §5.3): pointer samples in, one of tap / drag / swipe / longpress / twofinger / pinch out.
    Times are milliseconds supplied by the caller. Pure; no DOM. */
 export class Gestures {
-  constructor({ tapMs = 250, longPressMs = 600, swipeDistance = 80, swipeVelocity = 600, dragThreshold = 8 } = {}) {
-    this.tapMs = tapMs; this.longPressMs = longPressMs; this.swipeDistance = swipeDistance; this.swipeVelocity = swipeVelocity; this.dragThreshold = dragThreshold;
+  constructor({ tapMs = 250, longPressMs = 600, swipeDistance = 80, swipeVelocity = 600, swipeMs = 300, dragThreshold = 8 } = {}) {
+    this.tapMs = tapMs; this.longPressMs = longPressMs; this.swipeDistance = swipeDistance; this.swipeVelocity = swipeVelocity; this.swipeMs = swipeMs; this.dragThreshold = dragThreshold;
     this.pointers = new Map(); this.multi = false; this.multiFired = false; this.longFired = false; this.pinchStart = 0;
   }
   down(id, x, y, t) {
@@ -41,7 +41,8 @@ export class Gestures {
     if (this.longFired) return null;
     const duration = t - p.t0, dist = Math.hypot(x - p.x0, y - p.y0), velocity = duration > 0 ? dist / (duration / 1000) : Infinity;
     if (dist <= this.dragThreshold && duration <= this.tapMs) return { type: 'tap', x, y };
-    if (dist >= this.swipeDistance && velocity >= this.swipeVelocity) {
+    // A swipe is a flick: far, fast AND short. A long fast drag is steering, however quick.
+    if (dist >= this.swipeDistance && velocity >= this.swipeVelocity && duration <= this.swipeMs) {
       const dx = x - p.x0, dy = y - p.y0;
       return { type: 'swipe', dir: Math.abs(dx) >= Math.abs(dy) ? (dx > 0 ? 'right' : 'left') : (dy > 0 ? 'down' : 'up') };
     }

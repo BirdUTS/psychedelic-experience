@@ -74,7 +74,14 @@ export class Director {
   }
 
   update(dt, input) {
-    if (input.paused && this.lastOut) return this.lastOut;   // a paused world advances nothing
+    if (input.paused && this.lastOut) {
+      // A paused world advances nothing and repeats no one-shot flags: the copy is built once per pause.
+      if (!this.pausedOut || this.pausedOut.source !== this.lastOut) {
+        const o = this.lastOut;
+        this.pausedOut = { ...o, request: null, sceneChange: null, rewind: false, injection: false, phraseBoundary: false, events: { beat: false, accent: false, phrase: false }, source: o };
+      }
+      return this.pausedOut;
+    }
     dt = clamp(dt || 0, 0, 0.1);
     this.clock += dt;
     const music = input.music, room = input.room, user = input.user;
