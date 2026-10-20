@@ -1,5 +1,6 @@
-/* EXTRA / Living Worlds · Flow with Mind — browser app.
-   Owns the renderer, the audio graph, the HUD and the controls. All decisions come from the pure engine. */
+/* EXTRA / Living Worlds · Flow with Mind v2 — browser app.
+   Owns the renderer, audio graph, ship camera, play surface and drawer. All decisions come from the pure engine:
+   Director (lead/follow, metabolism, events), Ship (motion), Liveliness, SnapshotRing (rewind), Gestures. */
 import * as THREE from '../vendor/three.module.js';
 import { Physarum } from './sims/physarum.mjs';
 import { Swarmalators } from './sims/swarmalators.mjs';
@@ -7,21 +8,26 @@ import { Boids } from './sims/boids.mjs';
 import { Life } from './sims/life.mjs';
 import { AudioFeatures } from './engine/features.mjs';
 import { Director } from './engine/director.mjs';
-import { ARC_ORDER } from './engine/arcs.mjs';
+import { SCENES } from './engine/arcs.mjs';
 import { AudioGraph } from './audio.mjs';
 import { Playlist } from './engine/playlist.mjs';
-import { paletteHSL, paletteLUT } from './engine/palettes.mjs';
 import { PostFX } from './engine/post.mjs';
 import { JevClient, buildState } from './engine/jev-client.mjs';
 import { directorInput } from './engine/streams.mjs';
 import { requestActions } from './engine/requests.mjs';
+import { Liveliness } from './engine/liveliness.mjs';
+import { SnapshotRing } from './engine/snapshots.mjs';
+import { Ship } from './engine/ship.mjs';
+import { depthToAxes } from './engine/depth.mjs';
+import { Gestures } from './engine/gestures.mjs';
+import { Worlds } from './worlds.mjs';
 
-const $ = id => document.getElementById(id), TAU = Math.PI * 2;
+const $ = id => document.getElementById(id), RAD = Math.PI / 180;
 const WORLDS = {
-  physarum: ['01 / MYCELIAL INTELLIGENCE', 'The world<br>weaves itself.', 'Every path remembers another path.', 'sense trail → turn → deposit → diffuse and decay'],
-  swarm: ['02 / COLLECTIVE RESONANCE', 'A thousand lights.<br>One becoming.', 'Each light keeps its own rhythm, until it does not.', 'position ↔ phase coupling · synchrony, anti-synchrony, rings'],
-  boids: ['03 / OCEAN OF MOTION', 'You are part<br>of the current.', 'You are inside the flock, not in front of a screen.', 'local neighbours: separation + alignment + cohesion'],
-  life: ['04 / CELLULAR COSMOS', 'Small rules.<br>Living worlds.', 'A universe grows from three rules.', 'B3/S23 · toroidal · synchronous · mapped onto a sphere'],
+  physarum: ['01 / MYCELIAL INTELLIGENCE', 'The world<br>weaves itself.', 'Every path remembers another path. The network chases the food the music drops.', 'sense trail → turn → deposit → diffuse and decay · food jumps on accents'],
+  swarm: ['02 / COLLECTIVE RESONANCE', 'A thousand lights.<br>One becoming.', 'Each light keeps its own rhythm, until it does not.', 'position ↔ phase coupling · active phase wave ↔ rings by entropy · kicks on the beat'],
+  boids: ['03 / OCEAN OF MOTION', 'You are part<br>of the current.', 'The flock streams past you and re-forms ahead.', 'local neighbours: separation + alignment + cohesion · wind turns on the phrase'],
+  life: ['04 / CELLULAR COSMOS', 'Small rules.<br>Living worlds.', 'A universe grows from three rules.', 'B3/S23 · toroidal · synchronous · a tunnel of cells in flight'],
 };
 
 // ---------- renderer ----------
@@ -36,166 +42,212 @@ const group = new THREE.Group(); scene.add(group);
 const clock = new THREE.Clock();
 const drawSize = renderer.getDrawingBufferSize(new THREE.Vector2());
 const post = new PostFX(renderer, { width: drawSize.x, height: drawSize.y });
-const dummy = new THREE.Object3D(), color = new THREE.Color(), direction = new THREE.Vector3(), up = new THREE.Vector3(0, 1, 0);
-const starPos = new Float32Array(1800); for (let i = 0; i < starPos.length; i++) starPos[i] = (Math.random() - 0.5) * 100;
-const starsG = new THREE.BufferGeometry(); starsG.setAttribute('position', new THREE.BufferAttribute(starPos, 3));
-scene.add(new THREE.Points(starsG, new THREE.PointsMaterial({ color: 0x6c8aab, size: 0.045, transparent: true, opacity: 0.45 })));
-
-// ---------- simulations ----------
-const sims = { physarum: new Physarum(), swarm: new Swarmalators(), boids: new Boids(), life: new Life(64, 1) };
-let world = 'physarum', seed = 100;
-const textureCanvas = document.createElement('canvas'); textureCanvas.width = textureCanvas.height = sims.physarum.size;
-const tx = textureCanvas.getContext('2d'), pixels = tx.createImageData(sims.physarum.size, sims.physarum.size);
-const texture = new THREE.CanvasTexture(textureCanvas); texture.colorSpace = THREE.SRGBColorSpace; texture.minFilter = THREE.LinearFilter; texture.magFilter = THREE.LinearFilter;
-const tunnelTexture = texture.clone();   // same canvas, its own repeat/offset for the flight tunnel
-const haloCanvas = document.createElement('canvas'); haloCanvas.width = haloCanvas.height = 64;
-const hc = haloCanvas.getContext('2d'), hg = hc.createRadialGradient(32, 32, 0, 32, 32, 32);
-hg.addColorStop(0, 'rgba(255,255,255,1)'); hg.addColorStop(0.15, 'rgba(255,255,255,.7)'); hg.addColorStop(0.5, 'rgba(255,255,255,.12)'); hg.addColorStop(1, 'rgba(255,255,255,0)');
-hc.fillStyle = hg; hc.fillRect(0, 0, 64, 64); const haloTexture = new THREE.CanvasTexture(haloCanvas);
-let visual = null;
-
-function addHalos(sim) {
-  const g = new THREE.BufferGeometry();
-  g.setAttribute('position', new THREE.BufferAttribute(sim.p, 3));
-  g.setAttribute('color', new THREE.BufferAttribute(new Float32Array(sim.count * 3), 3));
-  const dots = new THREE.Points(g, new THREE.PointsMaterial({ map: haloTexture, size: 0.65, transparent: true, opacity: 0.65, vertexColors: true, blending: THREE.AdditiveBlending, depthWrite: false }));
-  dots.frustumCulled = false; group.add(dots); visual.userData.halo = dots;
-}
-function clean() {
-  while (group.children.length) {
-    const obj = group.children[0]; group.remove(obj);
-    obj.traverse(o => { o.geometry?.dispose(); if (o.material) for (const m of (Array.isArray(o.material) ? o.material : [o.material])) m.dispose(); });
-  }
-  visual = null;
-}
-function build() {
-  clean();
-  if (world === 'physarum' && cameraMode === 'flight') {
-    // Forward flight: the trail field lines the inside of a tunnel the camera moves through.
-    tunnelTexture.repeat.set(1, 3); tunnelTexture.wrapS = tunnelTexture.wrapT = THREE.RepeatWrapping;
-    const mat = new THREE.MeshBasicMaterial({ map: tunnelTexture, side: THREE.BackSide, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false });
-    visual = new THREE.Mesh(new THREE.CylinderGeometry(6, 6, 60, 48, 1, true), mat);
-    visual.rotation.x = Math.PI / 2; visual.userData.tunnel = true; group.add(visual);
-  } else if (world === 'physarum') {
-    const mat = new THREE.MeshBasicMaterial({ map: texture, side: THREE.DoubleSide, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false });
-    visual = new THREE.Mesh(new THREE.SphereGeometry(8.5, 64, 40), mat); group.add(visual);
-    group.add(new THREE.Mesh(new THREE.SphereGeometry(9, 40, 24), new THREE.MeshBasicMaterial({ color: 0x5a7990, wireframe: true, transparent: true, opacity: 0.025 })));
-  } else if (world === 'swarm') {
-    visual = new THREE.InstancedMesh(new THREE.IcosahedronGeometry(0.065, 1), new THREE.MeshBasicMaterial({ color: 0xffffff }), sims.swarm.count);
-    visual.instanceMatrix.setUsage(THREE.DynamicDrawUsage); group.add(visual);
-    const trailG = new THREE.BufferGeometry(); trailG.setAttribute('position', new THREE.BufferAttribute(new Float32Array(sims.swarm.count * 6), 3));
-    const trail = new THREE.LineSegments(trailG, new THREE.LineBasicMaterial({ color: 0x81c6ed, transparent: true, opacity: 0.16 }));
-    group.add(trail); visual.userData.trail = trail;
-  } else if (world === 'boids') {
-    const shape = $('skin').value;
-    const geo = shape === 'lights' ? new THREE.IcosahedronGeometry(0.065, 0) : new THREE.ConeGeometry(shape === 'birds' ? 0.17 : 0.09, 0.45, shape === 'birds' ? 3 : 5);
-    visual = new THREE.InstancedMesh(geo, new THREE.MeshBasicMaterial({ color: 0xffffff }), sims.boids.count);
-    visual.instanceMatrix.setUsage(THREE.DynamicDrawUsage); group.add(visual);
-  } else {
-    visual = new THREE.InstancedMesh(new THREE.BoxGeometry(0.12, 0.12, 0.12), new THREE.MeshBasicMaterial({ color: 0xffffff }), sims.life.grid.cells.length);
-    visual.instanceMatrix.setUsage(THREE.DynamicDrawUsage); group.add(visual);
-  }
-  visual.frustumCulled = false;
-  if (world === 'swarm') addHalos(sims.swarm);
-  if (world === 'boids') addHalos(sims.boids);
-}
 
 // ---------- engine ----------
+const sims = { physarum: new Physarum(), swarm: new Swarmalators(), boids: new Boids(), life: new Life(64, 1) };
+const worlds = new Worlds(group, sims, scene);
 const audio = new AudioGraph($('player'));
 const playlist = new Playlist();
+let world = 'physarum', seed = 100;
 const director = new Director({ scene: world });
+const ship = new Ship();
+const liveliness = new Liveliness();
+const rings = Object.fromEntries(Object.entries(sims).map(([k, s]) => [k, new SnapshotRing(s.state())]));
+const gestures = new Gestures();
+const jev = new JevClient({ now: () => performance.now() / 1000 });
+const bump = () => { jev.bump(); };
 let musicF = null, roomF = null;
 function ensureFeatures(sampleRate) {
   if (!musicF || musicF.sampleRate !== sampleRate) { musicF = new AudioFeatures({ sampleRate, frameRate: 60 }); roomF = new AudioFeatures({ sampleRate, frameRate: 60 }); }
 }
 ensureFeatures(48000);
+
+let paused = matchMedia('(prefers-reduced-motion: reduce)').matches, simTime = 0, acc = 0, lifeAcc = 0, simClock = 0;
+let depth = 0.5, sceneLocked = false, autoInitiative = true, gestureCount = 0, lastGesture = 0, lastInteraction = 0;
+let orbit = 0, pitch = 0.12, zoom = 19, attractor = null, attractorUntil = 0, xrSession = null;
+let dissolving = null, jump = null, snapshotTimer = 0, rewindNote = '', fps = 60;
+const summary = { E30: 0, E5: 0, C30: 0, B30: 0, A30: 0 }, recentDecisions = [];
+let lastJevAsk = -Infinity;
 const timing = { step: 0, steps: 0, render: 0, dt: 0 };
 window.__flow = {
-  director, audio, sims, timing,
-  get musicF() { return musicF; }, get roomF() { return roomF; },
-  frame: dt => frame(dt),
-  advance(seconds, dt = 1 / 60) { for (let t = 0; t < seconds; t += dt) frame(dt); return seconds; },
+  director, audio, sims, worlds, ship, liveliness, rings, timing, jev, gestures,
+  get musicF() { return musicF; }, get roomF() { return roomF; }, get depth() { return depth; }, set depth(v) { setDepth(v); },
+  forceLiveliness: null, skipRender: false,
+  get jump() { return jump; }, get world() { return world; }, get dissolving() { return dissolving; },
+  frame: dt => frame(dt), advance(seconds, dt = 1 / 60) { for (let t = 0; t < seconds; t += dt) frame(dt); return seconds; },
+  rewind: () => rewind('manual'), launch: () => setShipMode('ship'), hover: () => setShipMode('hover'),
 };
 
-let paused = matchMedia('(prefers-reduced-motion: reduce)').matches, simTime = 0, acc = 0, lifeAcc = 0, fade = 1;
-let orbit = 0, pitch = 0.12, zoom = 19, attractor = null, xrSession = null, cameraMode = 'orbit';
-let autoInitiative = true, sceneLocked = false, gestureCount = 0, lastGesture = 0, lastOut = null, lastFrames = null;
-const jev = new JevClient({ now: () => performance.now() / 1000 });
-const bump = () => { jev.bump(); };
-// Thirty-second summaries for JEV's bounded state.
-const summary = { E30: 0, E5: 0, C30: 0, B30: 0, A30: 0 };
-const recentDecisions = [];
-let lastJevAsk = -Infinity, lastWaypointSeen = -1;
-
-// ---------- scene selection ----------
+// ---------- worlds, scenes, snapshots ----------
 function choose(id, { auto = false } = {}) {
   if (!WORLDS[id]) return;
-  world = id; fade = 0; build();
+  world = id; worlds.build(id, ship.mode, $('skin').value);
   const a = WORLDS[id];
   $('chapter').textContent = a[0]; $('worldTitle').innerHTML = a[1]; $('worldHint').textContent = a[2]; $('rule').textContent = a[3];
   document.querySelectorAll('[data-world]').forEach(b => { const on = b.dataset.world === id; b.classList.toggle('selected', on); b.setAttribute('aria-pressed', String(on)); });
   director.acknowledgeScene(id);
   if (!auto) bump();
+  // A world that was frozen when we left it comes back from its best snapshot.
+  if (liveliness.value(id) < 0.35 && rings[id].count) rewind('return');
 }
-document.querySelectorAll('[data-world]').forEach(b => b.onclick = () => choose(b.dataset.world));
-$('reset').onclick = () => { seed++; const s = sims[world]; if (world === 'life') s.seed(seed); else s.reset(seed); bump(); };
-$('skin').onchange = () => { if (world === 'boids') build(); };
+function rewind(reason = 'manual') {
+  if (dissolving || jump) return false;
+  const sim = sims[world], ring = rings[world];
+  if (world === 'life' && sim.pure) { sim.seed(++seed); rewindNote = 'reseeded (pure rules)'; }
+  else {
+    const best = ring.best();
+    if (!best) { if (world === 'life') sim.seed(++seed); else sim.reset(++seed); rewindNote = 'reseeded (no snapshot yet)'; }
+    else { ring.rewindTo(best.index, { seconds: 2 }); dissolving = { ring, id: world }; rewindNote = `rewind → ${Math.round(simClock - best.time)} s ago (${reason})`; }
+  }
+  liveliness.reset(world); snapshotTimer = 0;
+  $('decision').textContent = rewindNote;
+  return true;
+}
+function startJump(next) {
+  if (jump || !WORLDS[next] || next === world) return;
+  jump = { t: 0, to: next, switched: false };
+}
+function updateJump(dt) {
+  jump.t += dt;
+  if (!jump.switched && jump.t >= 2) { jump.switched = true; choose(jump.to, { auto: true }); }
+  const u = jump.t < 2 ? jump.t / 2 : (jump.t - 2) / 2;
+  group.scale.set(1, 1, jump.t < 2 ? 1 - 0.9 * u : 0.6 + 0.4 * Math.min(1, u));
+  if (jump.t >= 4 || (jump.switched && world !== jump.to)) { jump = null; group.scale.set(1, 1, 1); }   // never leave a jump hanging
+}
+function setShipMode(mode) {
+  if (mode === 'ship') ship.launch(); else ship.hover();
+  worlds.build(world, ship.mode, $('skin').value);
+  $('hoverToggle').textContent = 'Hover: ' + (ship.mode === 'hover' ? 'on' : 'off'); $('hoverToggle').setAttribute('aria-pressed', String(ship.mode === 'hover'));
+  $('ringMode').textContent = (autoInitiative ? 'auto' : 'locked') + ' · ' + (ship.mode === 'ship' ? 'ship' : 'hover');
+  touch();
+}
+function setDepth(v) {
+  depth = Math.max(0, Math.min(1, Number.isFinite(v) ? v : depth)); $('depth').value = depth.toFixed(2);
+  const hint = $('depthHint'); hint.classList.add('show'); hint.querySelector('i').style.bottom = (depth * 100) + '%';
+  clearTimeout(setDepth.timer); setDepth.timer = setTimeout(() => hint.classList.remove('show'), 1500);
+  bump();
+}
+function touch() { lastInteraction = simClock; document.body.classList.remove('idle'); }
 
-// ---------- initiative controls ----------
-const initiativeEl = $('initiative');
+// ---------- initiative ring ----------
+const ringEl = $('ring'), ringDot = $('ringDot');
+function ringValueFromEvent(e) {
+  const r = ringEl.getBoundingClientRect(), frac = Math.max(0, Math.min(1, (e.clientX - r.left) / r.width));
+  return 1 - 2 * frac;   // left end = Lead me (+1), right end = Follow me (−1)
+}
 function setAuto(on) {
   autoInitiative = on;
-  if (on) director.initiative.unlock(); else director.initiative.lock(+initiativeEl.value);
-  $('initiativeAuto').textContent = 'Auto: ' + (on ? 'on' : 'off'); $('initiativeAuto').setAttribute('aria-pressed', String(on));
+  if (on) director.initiative.unlock(); else director.initiative.lock(director.initiative.I);
+  document.body.classList.toggle('locked', !on);
+  $('ringMode').textContent = (on ? 'auto' : 'locked') + ' · ' + (ship.mode === 'ship' ? 'ship' : 'hover');
 }
-initiativeEl.addEventListener('input', () => { director.initiative.lock(+initiativeEl.value); autoInitiative = false; $('initiativeAuto').textContent = 'Auto: off'; $('initiativeAuto').setAttribute('aria-pressed', 'false'); bump(); });
-$('initiativeAuto').onclick = () => { setAuto(!autoInitiative); bump(); };
-$('passLead').onclick = () => { director.initiative.setBaseline(director.initiative.I0 > 0 ? -0.6 : 0.6); setAuto(true); bump(); $('decision').textContent = director.initiative.I0 > 0 ? 'The world takes the lead.' : 'The world follows you.'; };
-$('lockScene').onclick = () => { sceneLocked = !sceneLocked; $('lockScene').textContent = 'Lock scene: ' + (sceneLocked ? 'on' : 'off'); $('lockScene').setAttribute('aria-pressed', String(sceneLocked)); bump(); };
-$('arc').onchange = () => { const v = $('arc').value; if (v === 'auto') { director.arcs.pin(false); $('pinArc').textContent = 'Pin arc: off'; $('pinArc').setAttribute('aria-pressed', 'false'); } else director.arcs.select(v, { pin: $('pinArc').getAttribute('aria-pressed') === 'true' }); bump(); };
-$('pinArc').onclick = () => { const on = $('pinArc').getAttribute('aria-pressed') !== 'true'; director.arcs.pin(on); $('pinArc').textContent = 'Pin arc: ' + (on ? 'on' : 'off'); $('pinArc').setAttribute('aria-pressed', String(on)); };
-$('lifePure').onchange = () => { sims.life.pure = $('lifePure').checked; };
-for (const id of ['intensity', 'speed', 'feedback']) $(id).oninput = () => { $(id + 'Out').textContent = Number($(id).value).toFixed(2) + (id === 'speed' ? '×' : ''); bump(); };
-$('symmetry').onchange = bump; $('hue').oninput = bump;
-function setPause(v) { paused = v; $('pause').textContent = v ? 'Resume' : 'Pause'; $('pause').setAttribute('aria-pressed', String(v)); }
-setPause(paused); $('pause').onclick = () => setPause(!paused);
-$('hide').onclick = () => { document.body.classList.toggle('immersed'); $('hide').textContent = document.body.classList.contains('immersed') ? 'Show controls' : 'Immerse'; };
-$('explainToggle').onclick = () => { const on = $('explain').hidden; $('explain').hidden = !on; $('explainToggle').setAttribute('aria-pressed', String(on)); };
-addEventListener('keydown', e => { if (e.key === 'Escape') { document.body.classList.remove('immersed'); $('hide').textContent = 'Immerse'; } });
-$('view').onchange = () => { applyCamera($('view').value, true); bump(); };
-function applyCamera(mode, force = false) {
-  if (mode === cameraMode && !force) return;
-  const wasFlight = cameraMode === 'flight';
-  cameraMode = mode;
-  zoom = mode === 'inside' || mode === 'flight' ? 0.01 : mode === 'close' ? 11 : 19;
-  if (world === 'physarum' && wasFlight !== (mode === 'flight')) build();   // sphere ↔ tunnel
+function placeDot(I) {
+  const frac = (1 - I) / 2, theta = Math.PI - frac * Math.PI;
+  ringDot.setAttribute('cx', (200 + 170 * Math.cos(theta)).toFixed(1)); ringDot.setAttribute('cy', (100 - 170 * Math.sin(theta)).toFixed(1));
+  ringEl.setAttribute('aria-valuenow', I.toFixed(2));
 }
-// Flight: the viewer stays at the origin looking down −z; the world streams toward them.
-function flight(dt, out) {
-  const speed = 2 + 4 * Math.min(1, out.targets.T);
-  if (world === 'boids') {
-    const s = sims.boids, p = s.p;
-    for (let i = 0; i < s.active; i++) { const z = i * 3 + 2; p[z] += speed * dt; if (p[z] > 4) p[z] = -24; }
-  } else if (world === 'physarum' && visual?.userData.tunnel) {
-    tunnelTexture.offset.y -= speed * dt / 20; visual.rotation.y += dt * 0.03;
+let ringDrag = false, ringLastTap = 0, ringPressTimer = null;
+ringEl.addEventListener('pointerdown', e => {
+  e.stopPropagation(); try { ringEl.setPointerCapture(e.pointerId); } catch { /* pointer already gone */ } ringDrag = true; touch();
+  const now = performance.now();
+  if (now - ringLastTap < 300) { director.initiative.setBaseline(director.initiative.I0 > 0 ? -0.6 : 0.6); setAuto(true); $('decision').textContent = director.initiative.I0 > 0 ? 'The world takes the lead.' : 'The world follows you.'; ringLastTap = 0; return; }
+  ringLastTap = now;
+  ringPressTimer = setTimeout(() => { ringDrag = false; setShipMode(ship.mode === 'ship' ? 'hover' : 'ship'); }, 600);
+  director.initiative.lock(ringValueFromEvent(e)); setAuto(false); bump();
+});
+ringEl.addEventListener('pointermove', e => { if (!ringDrag) return; clearTimeout(ringPressTimer); director.initiative.lock(ringValueFromEvent(e)); });
+for (const ev of ['pointerup', 'pointercancel']) ringEl.addEventListener(ev, () => { ringDrag = false; clearTimeout(ringPressTimer); });
+ringEl.addEventListener('keydown', e => { if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') { director.initiative.lock(Math.max(-1, Math.min(1, director.initiative.I + (e.key === 'ArrowLeft' ? 0.1 : -0.1)))); setAuto(false); e.preventDefault(); } });
+
+// ---------- gestures on the glass ----------
+const canvas = renderer.domElement;
+let dragging = false;
+function act(action) {
+  if (!action) return;
+  touch();
+  switch (action.type) {
+    case 'tap':
+      if (ship.mode === 'hover') { setShipMode('ship'); $('decision').textContent = 'Launched. Tap again to pulse; long-press the ring to hover.'; }
+      else { director.agency.gesture(2); attractor = { x: action.x / innerWidth, y: action.y / innerHeight }; attractorUntil = simClock + 0.6; }
+      break;
+    case 'swipe': {
+      if (action.dir === 'left' || action.dir === 'right') {
+        const i = SCENES.indexOf(world), next = SCENES[(i + (action.dir === 'left' ? 1 : SCENES.length - 1)) % SCENES.length];
+        director.requestScene(next); $('decision').textContent = `requested: ${next}` + (director.initiative.I > -0.5 ? ' · at the next phrase' : '');
+      } else setDepth(depth + (action.dir === 'up' ? 0.1 : -0.1));
+      break;
+    }
+    case 'longpress': toggleLock(); break;
+    case 'twofinger': rewind('gesture'); break;
+    case 'pinch': ship.trim((action.scale - 1) * 0.05); break;
   }
 }
-
-// ---------- pointer: orbit, attractor, gestures ----------
-let drag = null;
-const canvas = renderer.domElement;
-canvas.addEventListener('pointerdown', e => { drag = { x: e.clientX, y: e.clientY }; canvas.setPointerCapture(e.pointerId); attractor = { x: e.clientX / innerWidth, y: e.clientY / innerHeight }; gestureCount++; });
-canvas.addEventListener('pointermove', e => {
-  if (!drag) return;
-  orbit -= (e.clientX - drag.x) * 0.004; pitch = Math.max(-1.2, Math.min(1.2, pitch + (e.clientY - drag.y) * 0.003));
-  drag = { x: e.clientX, y: e.clientY }; attractor = { x: e.clientX / innerWidth, y: e.clientY / innerHeight };
-  const now = clock.elapsedTime; if (now - lastGesture > 0.1) { gestureCount++; lastGesture = now; }
+canvas.addEventListener('pointerdown', e => {
+  try { canvas.setPointerCapture(e.pointerId); } catch { /* pointer already gone */ } dragging = true; touch();
+  act(gestures.down(e.pointerId, e.clientX, e.clientY, performance.now()));
+  gestureCount++;
 });
-for (const ev of ['pointerup', 'pointercancel']) canvas.addEventListener(ev, () => { drag = null; attractor = null; });
-canvas.addEventListener('wheel', e => { e.preventDefault(); zoom = Math.max(0.01, Math.min(35, zoom + e.deltaY * 0.008)); }, { passive: false });
-addEventListener('resize', () => { camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); renderer.setSize(innerWidth, innerHeight); renderer.getDrawingBufferSize(drawSize); post.setSize(drawSize.x, drawSize.y); });
+canvas.addEventListener('pointermove', e => {
+  if (!dragging) return;
+  const a = gestures.move(e.pointerId, e.clientX, e.clientY, performance.now());
+  if (a?.type === 'drag') {
+    if (ship.mode === 'ship') ship.steer(-a.dx * 0.25, -a.dy * 0.2);
+    else { orbit -= a.dx * 0.004; pitch = Math.max(-1.2, Math.min(1.2, pitch + a.dy * 0.003)); }
+    attractor = { x: e.clientX / innerWidth, y: e.clientY / innerHeight }; attractorUntil = simClock + 0.3;
+    const now = clock.elapsedTime; if (now - lastGesture > 0.1) { gestureCount++; lastGesture = now; }
+  } else if (a?.type === 'pinch') act(a);
+});
+for (const ev of ['pointerup', 'pointercancel']) canvas.addEventListener(ev, e => { dragging = false; act(gestures.up(e.pointerId, e.clientX, e.clientY, performance.now())); });
+canvas.addEventListener('wheel', e => { e.preventDefault(); touch(); if (ship.mode === 'ship') ship.trim(-e.deltaY * 0.0008); else zoom = Math.max(0.01, Math.min(35, zoom + e.deltaY * 0.008)); }, { passive: false });
+// Shake to rewind (phones): two strong accelerations within 600 ms.
+let shakeAt = 0;
+addEventListener('devicemotion', e => {
+  const a = e.accelerationIncludingGravity; if (!a) return;
+  const g = Math.hypot(a.x || 0, a.y || 0, a.z || 0);
+  if (g > 18) { const now = performance.now(); if (now - shakeAt < 600 && now - shakeAt > 80) rewind('shake'); shakeAt = now; }
+});
+addEventListener('keydown', e => {
+  if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT' || e.target.tagName === 'TEXTAREA') return;
+  touch();
+  switch (e.key) {
+    case ' ': e.preventDefault(); act({ type: 'tap', x: innerWidth / 2, y: innerHeight / 2 }); break;
+    case 'ArrowLeft': ship.steer(-8, 0); break; case 'ArrowRight': ship.steer(8, 0); break; case 'ArrowUp': ship.steer(0, -6); break; case 'ArrowDown': ship.steer(0, 6); break;
+    case '[': act({ type: 'swipe', dir: 'right' }); break; case ']': act({ type: 'swipe', dir: 'left' }); break;
+    case '+': case '=': setDepth(depth + 0.1); break; case '-': setDepth(depth - 0.1); break;
+    case 'h': case 'H': toggleLock(); break; case 'r': case 'R': rewind('key'); break;
+    case 'v': case 'V': setShipMode(ship.mode === 'ship' ? 'hover' : 'ship'); break;
+    case 'p': case 'P': setPause(!paused); break;
+    case 'Escape': toggleDrawer(); break;
+  }
+});
 const wake = () => { audio.resume(); };
 addEventListener('pointerdown', wake); addEventListener('keydown', wake);
+
+// ---------- drawer and setup controls ----------
+function toggleDrawer(force) {
+  const open = force ?? $('drawer').hidden;
+  $('drawer').hidden = !open; touch();
+}
+$('gear').onclick = () => toggleDrawer(true); $('closeDrawer').onclick = () => toggleDrawer(false);
+$('hoverToggle').onclick = () => setShipMode(ship.mode === 'ship' ? 'hover' : 'ship');
+document.querySelectorAll('[data-world]').forEach(b => b.onclick = () => { if (!jump) startJump(b.dataset.world); });
+function toggleLock(force) {
+  sceneLocked = force ?? !sceneLocked;
+  $('lockScene').textContent = 'Lock scene: ' + (sceneLocked ? 'on' : 'off'); $('lockScene').setAttribute('aria-pressed', String(sceneLocked));
+  $('decision').textContent = sceneLocked ? 'Holding this world.' : 'The world may move on.'; bump();
+}
+$('lockScene').onclick = () => toggleLock();
+$('rewind').onclick = () => rewind('button');
+$('reset').onclick = () => { const s = sims[world]; if (world === 'life') s.seed(++seed); else s.reset(++seed); liveliness.reset(world); bump(); };
+$('arc').onchange = () => { const v = $('arc').value; if (v === 'auto') { director.arcs.pin(false); $('pinArc').textContent = 'Pin arc: off'; $('pinArc').setAttribute('aria-pressed', 'false'); } else director.arcs.select(v, { pin: $('pinArc').getAttribute('aria-pressed') === 'true' }); bump(); };
+$('pinArc').onclick = () => { const on = $('pinArc').getAttribute('aria-pressed') !== 'true'; director.arcs.pin(on); $('pinArc').textContent = 'Pin arc: ' + (on ? 'on' : 'off'); $('pinArc').setAttribute('aria-pressed', String(on)); };
+$('skin').onchange = () => { if (world === 'boids') worlds.build(world, ship.mode, $('skin').value); };
+$('lifePure').onchange = () => { sims.life.pure = $('lifePure').checked; };
+function setPause(v) { paused = v; $('pause').textContent = v ? 'Resume' : 'Pause'; $('pause').setAttribute('aria-pressed', String(v)); }
+setPause(paused); $('pause').onclick = () => setPause(!paused);
+$('hide').onclick = () => { document.body.classList.toggle('immersed'); $('hide').textContent = document.body.classList.contains('immersed') ? 'Show titles' : 'Immerse'; };
+$('explainToggle').onclick = () => { const on = $('explain').hidden; $('explain').hidden = !on; $('explainToggle').setAttribute('aria-pressed', String(on)); };
+addEventListener('resize', () => { camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); renderer.setSize(innerWidth, innerHeight); renderer.getDrawingBufferSize(drawSize); post.setSize(drawSize.x, drawSize.y); });
 
 // ---------- sound sources ----------
 const player = $('player');
@@ -243,190 +295,39 @@ function micLabel() { $('roomMic').textContent = 'Room mic: ' + (audio.micOn ? '
 $('synthetic').onclick = () => { audio.setSynthetic(!audio.synthetic); syntheticLabel(); $('audioStatus').textContent = audio.synthetic ? 'Synthetic beat · not real audio, for testing the engine.' : 'Synthetic beat off.'; };
 function syntheticLabel() { $('synthetic').textContent = 'Synthetic beat: ' + (audio.synthetic ? 'on' : 'off'); $('synthetic').setAttribute('aria-pressed', String(audio.synthetic)); }
 
-// ---------- rendering ----------
-function paletteColor(mode, hue, t, v) { const [h, s, l] = paletteHSL(mode, hue / 360, t, v); color.setHSL(h, s, l); return color; }
-function renderWorld(out) {
-  const { palette, hue } = out.targets, pulse = 1 + 0.25 * out.pulse * +$('intensity').value;
-  if (world === 'physarum') {
-    // One palette lookup table per (mode, hue); per pixel only an index and a darkening multiply.
-    const field = sims.physarum.field, lut = paletteLUT(palette, (hue / 360 + 0.48) % 1), data = pixels.data;
-    for (let i = 0; i < field.length; i++) {
-      const v = Math.pow(1 - Math.exp(-field[i] * 1.3), 1.4), k = Math.min(1, v * 3), idx = ((v * 255) | 0) * 3, o = i * 4;
-      data[o] = lut[idx] * k; data[o + 1] = lut[idx + 1] * k; data[o + 2] = lut[idx + 2] * k; data[o + 3] = 255;
-    }
-    tx.putImageData(pixels, 0, 0);
-    if (visual.userData.tunnel) tunnelTexture.needsUpdate = true; else texture.needsUpdate = true;
-    if (!visual.userData.tunnel) { visual.rotation.y = simTime * 0.025; visual.scale.setScalar(0.96 + 0.04 * pulse); }
-    else visual.scale.set(0.97 + 0.03 * pulse, 1, 0.97 + 0.03 * pulse);
-  } else if (world === 'swarm') {
-    const s = sims.swarm, p = s.p, lines = visual.userData.trail.geometry.attributes.position;
-    for (let i = 0; i < s.active; i++) {
-      const phase = s.phase[i], glow = 0.8 + 0.55 * (0.5 + 0.5 * Math.sin(phase));
-      dummy.position.set(p[i * 3], p[i * 3 + 1], p[i * 3 + 2]); dummy.quaternion.identity(); dummy.scale.setScalar(glow * pulse); dummy.updateMatrix();
-      visual.setMatrixAt(i, dummy.matrix); visual.setColorAt(i, paletteColor(palette, hue, phase / TAU, 0.5 + 0.5 * Math.sin(phase)));
-      for (let k = 0; k < 3; k++) { lines.array[i * 6 + k] = p[i * 3 + k]; lines.array[i * 6 + 3 + k] = p[i * 3 + k] - s.delta[i * 3 + k] * 1.2; }
-    }
-    visual.count = s.active; lines.needsUpdate = true; visual.userData.trail.geometry.setDrawRange(0, s.active * 2);
-    visual.instanceMatrix.needsUpdate = true; visual.instanceColor.needsUpdate = true;
-  } else if (world === 'boids') {
-    const s = sims.boids, birds = $('skin').value === 'birds';
-    for (let i = 0; i < s.active; i++) {
-      const b = i * 3;
-      dummy.position.fromArray(s.p, b); direction.fromArray(s.v, b).normalize(); dummy.quaternion.setFromUnitVectors(up, direction);
-      dummy.scale.set(birds ? 1 + Math.sin(simTime * 8 + i) * 0.2 : 1, pulse, 1); dummy.updateMatrix();
-      visual.setMatrixAt(i, dummy.matrix); visual.setColorAt(i, paletteColor(palette, hue, i / s.count, 0.65));
-    }
-    visual.count = s.active; visual.instanceMatrix.needsUpdate = true; visual.instanceColor.needsUpdate = true;
-  } else {
-    const life = sims.life, cells = life.grid.cells, age = life.grid.age, n = life.size; let count = 0;
-    for (let i = 0; i < cells.length; i++) {
-      if (!cells[i]) continue;
-      const a = (i % n) / n * TAU, b = (Math.floor(i / n) + 0.5) / n * Math.PI, r = 7 + Math.min(age[i], 40) * 0.012;
-      dummy.position.set(r * Math.sin(b) * Math.cos(a), r * Math.cos(b), r * Math.sin(b) * Math.sin(a));
-      dummy.quaternion.identity(); dummy.scale.setScalar((0.6 + 0.6 * life.density) * pulse); dummy.updateMatrix();
-      visual.setMatrixAt(count, dummy.matrix); visual.setColorAt(count++, paletteColor(palette, hue, Math.min(age[i], 60) / 60, 0.65));
-    }
-    visual.count = count; visual.instanceMatrix.needsUpdate = true; if (visual.instanceColor) visual.instanceColor.needsUpdate = true;
+// ---------- requests (local phrases, then JEV) ----------
+function handleRequest(action) {
+  const actions = requestActions(action, { sceneLocked, symmetry: depthToAxes(depth).fold });
+  for (const a of actions) {
+    if (a.type === 'slider') { if (a.id === 'speed') setDepth(depth + (a.value < 1 ? -0.25 : 0.25)); else if (a.id === 'intensity') setDepth(depth - 0.2); }
+    else if (a.type === 'camera') setShipMode('hover');
+    else if (a.type === 'lockScene') toggleLock(a.value);
+    else if (a.type === 'symmetry') setDepth(a.value / 8);
+    else if (a.type === 'note') $('decision').textContent = a.text;
   }
-  if (visual?.userData.halo) {
-    const attrs = visual.userData.halo.geometry.attributes, s = sims[world];
-    attrs.position.needsUpdate = true; attrs.color.array.set(visual.instanceColor.array); attrs.color.needsUpdate = true;
-    visual.userData.halo.geometry.setDrawRange(0, s.active);
-  }
+  if (actions.length && !actions.some(a => a.type === 'note')) $('decision').textContent = 'request → ' + action.replace('_', ' ');
 }
-
-function stepSims(h, out) {
-  const energy = (musicF ? musicF.E : 0) * +$('intensity').value, sim = sims[world];
-  if (world === 'physarum') sim.step(h, energy, attractor);
-  else if (world === 'swarm') sim.step(h, energy, 0.7, attractor);
-  else if (world === 'boids') sim.step(h, energy, attractor);
-  else { lifeAcc += h * (out.hud.bpm / 60) * sims.life.generationsPerBeat; while (lifeAcc >= 1) { sims.life.step(); lifeAcc--; } }
-}
-
-function userState() {
-  return { H: 0.5, T: +$('speed').value / 2, D: +$('intensity').value, S: +$('symmetry').value, F: +$('feedback').value, hue: +$('hue').value, camera: $('view').value, sceneLocked };
-}
-
-let lastHUD = 0, lastExplain = 0, simClock = 0;
-let fps = 60;
-function animate() {
-  const raw = clock.getDelta(), dt = Math.min(raw, 0.1);
-  if (raw > 0) fps += (1 / raw - fps) * 0.05;
-  if (document.hidden && !renderer.xr.isPresenting) return;
-  frame(dt);
-}
-// One frame of the whole app for a given dt. The animation loop calls it with the real clock;
-// window.__flow.advance(seconds) drives it deterministically for headless checks.
-function frame(dt) {
-  simClock += dt;
-  const now = simClock;
-  const frames = audio.frames(now); lastFrames = frames;
-  ensureFeatures(frames.sampleRate);
-  musicF.update(frames.music, dt); roomF.update(frames.room, dt);
-  const latency = audio.latency();
-  const out = director.update(dt, directorInput({ frames, musicF, roomF, latency, gestures: gestureCount, user: userState(), online: navigator.onLine, paused }));
-  gestureCount = 0; lastOut = out;
-  const k30 = 1 - Math.exp(-dt / 30), k5 = 1 - Math.exp(-dt / 5);
-  summary.E30 += (out.hud.E - summary.E30) * k30; summary.E5 += (out.hud.E - summary.E5) * k5;
-  summary.C30 += (out.hud.C - summary.C30) * k30; summary.B30 += ((musicF ? musicF.B : 0) - summary.B30) * k30; summary.A30 += (out.As - summary.A30) * k30;
-  if (out.request) handleRequest(out.request);
-  if (jev.enabled && navigator.onLine && !paused && now - lastJevAsk >= 24) askJev('');
-  const sim = sims[world];
-  sim.setParams({ H: out.targets.H, T: Math.min(1, out.targets.T), D: out.targets.D });
-  if (out.injection) sim.inject(Math.random, 60 / out.hud.bpm);
-  if (out.sceneChange) choose(out.sceneChange, { auto: true });
-  applyCamera(out.targets.camera);
-  if (!paused) {
-    const step = dt * +$('speed').value * (0.5 + out.targets.T);
-    simTime += step; acc += step; fade = Math.min(1, fade + dt * 0.5);
-    const t0 = performance.now(); let steps = 0;
-    while (acc >= 1 / 30) { stepSims(1 / 30, out); acc -= 1 / 30; steps++; }
-    if (cameraMode === 'flight') flight(step, out);
-    const t1 = performance.now();
-    if (!window.__flow.skipRender) renderWorld(out);
-    timing.step = t1 - t0; timing.steps = steps; timing.render = performance.now() - t1; timing.dt = dt;
-  }
-  if (window.__flow.skipRender) { if (now - lastHUD > 0.15) { lastHUD = now; updateHUD(out, frames); } return; }
-  if (!renderer.xr.isPresenting) {
-    if (cameraMode === 'flight') { camera.position.set(0, 0, 0); camera.rotation.set(pitch * 0.5, orbit * 0.5, Math.sin(simTime * 0.2) * 0.05, 'YXZ'); }
-    else if (zoom < 0.1) { camera.position.set(0, 0, 0); camera.rotation.set(pitch, orbit, 0, 'YXZ'); }
-    else { const a = orbit + simTime * 0.025; camera.position.set(Math.sin(a) * zoom, Math.sin(pitch) * zoom, Math.cos(a) * zoom); camera.lookAt(0, 0, 0); }
-  }
-  group.scale.setScalar(0.95 + fade * 0.05);
-  if (renderer.xr.isPresenting) renderer.render(scene, camera);
-  else post.render(scene, camera, { fold: out.targets.S, feedback: out.targets.F, pulse: out.pulse, dt, fadeSeconds: Math.min(4, 16 * 60 / Math.max(60, out.hud.bpm)) });
-  if (now - lastHUD > 0.15) { lastHUD = now; updateHUD(out, frames); }
-  if (!$('explain').hidden && now - lastExplain > 0.5) { lastExplain = now; updateExplain(out, latency); }
-}
-
-function updateHUD(out, frames) {
-  const bars = $('meters').querySelectorAll('i');
-  [musicF.bands.bass, musicF.bands.mid, musicF.bands.high].forEach((v, i) => bars[i].style.height = (2 + v * 38) + 'px');
-  $('phaseDot').style.opacity = (0.15 + 0.85 * out.pulse).toFixed(2);
-  $('roomDot').style.opacity = frames.room ? (0.15 + 0.85 * Math.max(roomF.speech, roomF.onset)).toFixed(2) : '0.05';
-  $('stats').textContent = (frames.music ? `${frames.source.toUpperCase()} · B ${musicF.bands.bass.toFixed(2)} M ${musicF.bands.mid.toFixed(2)} H ${musicF.bands.high.toFixed(2)}` : 'BASS / MID / HIGH') + ` · ${Math.round(fps)} fps`;
-  if (autoInitiative) initiativeEl.value = out.I.toFixed(2);
-  const sound = audio.context && audio.context.state === 'running';
-  const sign = out.I >= 0 ? '+' : '';
-  let line = `${out.hud.leading} ${sign}${out.I.toFixed(2)}`;
-  if (!sound && !audio.synthetic) line += ' · tap to start sound';
-  else if (frames.music) line += ` · ${Math.round(out.hud.bpm)} BPM · C ${out.hud.C.toFixed(2)} · E ${out.hud.E.toFixed(2)} · room ${frames.room ? 'on' : 'off'}`;
-  else line += ' · listening';
-  line += navigator.onLine && jev.enabled ? ' · JEV' : ' · LOCAL DIRECTOR';
-  $('hud').textContent = line;
-}
-function updateExplain(out, latency) {
-  const src = out.hud.source, cls = s => `<dd class="${s}">${s}</dd>`;
-  const life = world === 'life' ? `<p>Life: ${sims.life.pure ? 'pure B3/S23, no perturbation' : `creative variant · ${sims.life.perturbations} random births so far`}</p>` : '';
-  $('explain').innerHTML = `<h3>WHO IS STEERING</h3><dl>
-<dt>H entropy</dt>${cls(src.H)}<dt>T tempo</dt>${cls(src.T)}<dt>D density</dt>${cls(src.D)}<dt>S symmetry</dt>${cls(src.S)}<dt>F feedback</dt>${cls(src.F)}<dt>P palette</dt>${cls(src.P)}<dt>camera</dt>${cls(src.Cam)}</dl>
-<p>Initiative ${out.I.toFixed(2)} (${autoInitiative ? 'auto, baseline ' + director.initiative.I0.toFixed(1) : 'locked'}) · agency ${out.As.toFixed(2)}<br>Arc ${out.hud.arc} · waypoint ${out.hud.waypoint + 1}${director.arcs.pinned ? ' · pinned' : ''}<br>Entropy target ${out.hTarget.toFixed(2)} ± ${out.hWidth.toFixed(2)} → ${out.targets.H.toFixed(2)}<br>Beat ${Math.round(out.hud.bpm)} BPM · coherence ${out.hud.C.toFixed(2)} · world phase ${out.I >= 0 ? 'ahead' : 'behind'} by ${Math.round(Math.abs(out.I) * 0.12 * 60000 / Math.max(60, out.hud.bpm))} ms<br>Latency compensation ${Math.round(latency.music * 1000)} ms (music) · ${Math.round(latency.room * 1000)} ms (room)<br>Novelty budget ${director.N.toFixed(2)}</p>
-<p>${WORLDS[world][3]}</p>${life}`;
-}
-
-choose(world); renderWorld(director.update(0.016, { music: null, room: null, gestures: 0, user: userState(), online: navigator.onLine })); renderer.setAnimationLoop(animate);
-
-// ---------- requests: local phrases first; the online director arrives in a later step ----------
-function setSlider(id, value) { $(id).value = value; $(id).dispatchEvent(new Event('input')); }
 function localCommand(text) {
-  const t = text.toLowerCase(); let handled = false;
-  const is = re => re.test(t);
+  const t = text.toLowerCase(), is = re => re.test(t); let handled = false;
   if (is(/pause|stop|暫停|停/)) { setPause(true); return true; }
   if (is(/resume|continue|繼續/)) { setPause(false); return true; }
-  if (is(/fish|bird|flock|魚|鳥/)) { choose('boids'); handled = true; }
-  if (is(/mycel|network|菌|網/)) { choose('physarum'); handled = true; }
-  if (is(/firefl|sync|螢|同步/)) { choose('swarm'); handled = true; }
-  if (is(/\blife\b|cell|生命/)) { choose('life'); handled = true; }
-  if (is(/slow|慢/)) { setSlider('speed', 0.45); handled = true; }
-  if (is(/fast|快/)) { setSlider('speed', 1.5); handled = true; }
-  if (is(/surround|inside|around me|包圍/)) { $('view').value = 'inside'; applyCamera('inside', true); handled = true; }
+  for (const [re, scene] of [[/fish|bird|flock|魚|鳥/, 'boids'], [/mycel|network|菌|網/, 'physarum'], [/firefl|sync|螢|同步/, 'swarm'], [/\blife\b|cell|生命/, 'life']]) if (is(re)) { director.requestScene(scene); handled = true; }
+  if (is(/slow|慢/)) { handleRequest('slower'); handled = true; }
+  if (is(/fast|快/)) { handleRequest('faster'); handled = true; }
+  if (is(/surround|inside|around me|包圍|hover|stop moving/)) { setShipMode('hover'); handled = true; }
+  if (is(/fly|launch|take off|飛|出發/)) { setShipMode('ship'); handled = true; }
   if (is(/lead me|take over|帶/)) { director.initiative.setBaseline(0.6); setAuto(true); handled = true; }
   if (is(/follow me|跟/)) { director.initiative.setBaseline(-0.6); setAuto(true); handled = true; }
-  if (is(/hold|stay|don.t change|唔好轉|keep/)) { if (!sceneLocked) $('lockScene').click(); handled = true; }
-  if (is(/warm|暖/)) { setSlider('hue', 20); handled = true; }
-  if (is(/cool|cold|冷/)) { setSlider('hue', 200); handled = true; }
-  if (is(/more symmetry|kaleid|對稱/)) { $('symmetry').value = String(Math.min(8, +$('symmetry').value + 2 || 2)); handled = true; }
-  if (is(/less symmetry|no symmetry/)) { $('symmetry').value = String(Math.max(0, +$('symmetry').value - 2)); handled = true; }
-  if (is(/calm|gentle|靜|冷靜/)) { setSlider('intensity', 0.4); handled = true; }
+  if (is(/hold|stay|don.t change|唔好轉|keep/)) { toggleLock(true); handled = true; }
+  if (is(/deeper|more symmetry|kaleid|對稱/)) { setDepth(depth + 0.2); handled = true; }
+  if (is(/shallower|less symmetry|no symmetry|calm|gentle|靜|冷靜/)) { setDepth(depth - 0.2); handled = true; }
+  if (is(/rewind|reset|again|snow|雪|重來/)) { rewind('voice'); handled = true; }
   if (handled) bump();
   return handled;
 }
-// Bounded actions JEV may return for a spoken or typed request.
-function handleRequest(action) {
-  const actions = requestActions(action, { sceneLocked, symmetry: +$('symmetry').value || 0 });
-  for (const a of actions) {
-    if (a.type === 'slider') setSlider(a.id, a.value);
-    else if (a.type === 'camera') { $('view').value = a.value; applyCamera(a.value, true); }
-    else if (a.type === 'lockScene') { if (sceneLocked !== a.value) $('lockScene').click(); }
-    else if (a.type === 'symmetry') $('symmetry').value = String(a.value);
-    else if (a.type === 'note') $('decision').textContent = a.text;
-  }
-  if (actions.length && !actions.some(a => a.type === 'note')) $('decision').textContent = 'JEV request → ' + action.replace('_', ' ');
-}
 function jevState(text = '') {
   return buildState({
-    scene: world, sceneAge: director.sceneAge,
-    arc: { name: director.arcs.arcName, waypoint: director.arcs.index },
+    scene: world, sceneAge: director.sceneAge, arc: { name: director.arcs.arcName, waypoint: director.arcs.index },
     features: { E_mean30: summary.E30, E_trend: summary.E5 - summary.E30, C_mean30: summary.C30, B_mean30: summary.B30, A_mean30: summary.A30, bpm: musicF ? musicF.bpm : 0 },
     initiative: { I: director.initiative.I, locked: director.initiative.locked, I0: director.initiative.I0 },
     locks: { scene: sceneLocked }, userText: text, recentDecisions, online: navigator.onLine,
@@ -444,16 +345,15 @@ async function askJev(text = '', force = false) {
   recentDecisions.push(line.slice(0, 120)); while (recentDecisions.length > 3) recentDecisions.shift();
   $('decision').textContent = line;
 }
-$('jev').disabled = false; $('jev').title = 'Ask the online director for bounded targets every ~24 s';
 $('jev').onclick = () => { jev.enabled = !jev.enabled; jev.bump(); $('jev').textContent = 'JEV: ' + (jev.enabled ? 'on' : 'off'); $('jev').setAttribute('aria-pressed', String(jev.enabled)); if (jev.enabled) askJev('', true); else $('decision').textContent = 'Local director running.'; };
 function decide(text = '') {
   if (text && localCommand(text)) { $('decision').textContent = 'Applied locally: ' + text; return; }
   if (!text) { $('decision').textContent = 'Local director running.'; return; }
   if (jev.enabled && navigator.onLine) { $('decision').textContent = 'Asking JEV…'; askJev(text, true); return; }
-  $('decision').textContent = 'Not a local phrase. Try: slower, faster, fish, mycelium, fireflies, life, surround me, lead me, follow me, hold, warmer, cooler, calm. Turn JEV on for free-form requests.';
+  $('decision').textContent = 'Not a local phrase. Try: slower, faster, fish, mycelium, fireflies, life, hover, fly, lead me, follow me, hold, deeper, calm, rewind. Turn JEV on for free-form requests.';
 }
 $('commandForm').onsubmit = e => { e.preventDefault(); const text = $('command').value.trim(); $('command').value = ''; if (text) decide(text); };
-window.__flow.jev = jev; window.__flow.askJev = askJev; window.__flow.jevState = jevState;
+window.__flow.askJev = askJev; window.__flow.jevState = jevState;
 const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition; let recognition = null;
 if (!Recognition) { $('listen').disabled = true; $('listen').textContent = 'Type a request'; }
 else $('listen').onclick = () => {
@@ -464,6 +364,122 @@ else $('listen').onclick = () => {
   recognition.onerror = () => { $('decision').textContent = 'Speech recognition unavailable; type the request instead.'; };
   try { recognition.start(); $('listen').textContent = 'Listening…'; $('decision').textContent = 'Browser speech recognition may use a network service. Only this one request is sent.'; } catch { recognition = null; }
 };
+
+// ---------- the frame ----------
+function stepSims(h, out) {
+  const energy = (musicF ? musicF.E : 0) * 0.8, sim = sims[world], pull = attractor && simClock < attractorUntil ? attractor : null;
+  if (world === 'physarum') sim.step(h, energy, pull);
+  else if (world === 'swarm') sim.step(h, energy, 0.7, pull);
+  else if (world === 'boids') sim.step(h, energy, pull);
+  else { lifeAcc += h * (out.hud.bpm / 60) * sims.life.generationsPerBeat; while (lifeAcc >= 1) { sims.life.step(); lifeAcc--; } }
+  liveliness.observe(world, sim.activity, h);
+}
+function dispatchEvents(out) {
+  const sim = sims[world], beatSeconds = 60 / Math.max(60, out.hud.bpm);
+  if (out.events.beat) {
+    if (world === 'physarum') sim.burst(3);
+    else if (world === 'swarm') sim.kick(0.3 * Math.max(0.3, out.pulse), 1 / 3, Math.random);
+    else if (world === 'boids') sim.gust(15, Math.random);
+  }
+  if (out.events.accent) {
+    if (world === 'physarum') sim.food(Math.random(), Math.random(), 12);
+    else if (world === 'swarm') sim.inject(Math.random, beatSeconds);
+    else if (world === 'boids') sim.inject(Math.random);
+    else sim.seedEdgeGlider(Math.random);
+  }
+  if (out.events.phrase) {
+    if (world === 'physarum') sim.breathe(0.3, 4, beatSeconds);
+    else if (world === 'boids') { sim.turnWind(90); sim.targetHeight((0.5 - summary.B30) * 6); }
+    else if (world === 'life') sim.stripe(Math.random() < 0.5 ? 'x' : 'y', Math.random);
+  }
+  if (out.injection) sim.inject(Math.random, beatSeconds);
+}
+function userState() {
+  const axes = depthToAxes(depth);
+  return { H: 0.5, T: 0.5, D: 0.5, S: axes.fold, F: axes.feedback, hue: 0, camera: ship.mode === 'ship' ? 'flight' : 'orbit', sceneLocked };
+}
+let lastHUD = 0, lastExplain = 0;
+function animate() {
+  const raw = clock.getDelta(), dt = Math.min(raw, 0.1);
+  if (raw > 0) fps += (1 / raw - fps) * 0.05;
+  if (document.hidden && !renderer.xr.isPresenting) return;
+  frame(dt);
+}
+function frame(dt) {
+  simClock += dt; const now = simClock;
+  if (now - lastInteraction > 3 && !document.body.classList.contains('idle') && $('drawer').hidden) document.body.classList.add('idle');
+  act(gestures.tick(performance.now()));
+  const frames = audio.frames(now);
+  ensureFeatures(frames.sampleRate);
+  musicF.update(frames.music, dt); roomF.update(frames.room, dt);
+  const L = window.__flow.forceLiveliness ?? liveliness.value(world);
+  const input = directorInput({ frames, musicF, roomF, latency: audio.latency(), gestures: gestureCount, user: userState(), online: navigator.onLine, paused });
+  input.liveliness = L;
+  const out = director.update(dt, input);
+  gestureCount = 0;
+  const k30 = 1 - Math.exp(-dt / 30), k5 = 1 - Math.exp(-dt / 5);
+  summary.E30 += (out.hud.E - summary.E30) * k30; summary.E5 += (out.hud.E - summary.E5) * k5;
+  summary.C30 += (out.hud.C - summary.C30) * k30; summary.B30 += ((musicF ? musicF.B : 0) - summary.B30) * k30; summary.A30 += (out.As - summary.A30) * k30;
+  if (out.request) handleRequest(out.request);
+  if (jev.enabled && navigator.onLine && !paused && now - lastJevAsk >= 24) askJev('');
+  const sim = sims[world];
+  sim.setParams({ H: out.targets.H, T: Math.min(1, out.targets.T), D: out.targets.D });
+  if (!paused && !dissolving) dispatchEvents(out);
+  if (out.rewind) rewind('metabolism');
+  if (out.sceneChange) startJump(out.sceneChange);
+  const energyTrend = summary.E5 - summary.E30;
+  ship.update(dt, { T: out.targets.T, pulse: out.pulse, intensity: 0.8, phraseBoundary: out.phraseBoundary, energyTrend, C: out.hud.C, drop: energyTrend < -0.12 });
+  if (jump) updateJump(dt);
+  const axes = depthToAxes(depth);
+  if (!paused) {
+    const step = dt * axes.speed * (0.5 + out.targets.T);
+    simTime += step; acc += step;
+    const t0 = performance.now(); let steps = 0;
+    if (dissolving) { if (dissolving.ring.update(dt, sims[dissolving.id].state(), { discrete: dissolving.id === 'life' ? [0, 1] : [] }) >= 1) dissolving = null; acc = 0; }
+    else while (acc >= 1 / 30) { stepSims(1 / 30, out); acc -= 1 / 30; steps++; }
+    const t1 = performance.now();
+    const speed = ship.speed * (jump ? 3 : 1), dz = speed * dt;
+    worlds.stream(dz); worlds.updateStars(speed, 2, ship.mode === 'ship' ? dz : 0);
+    snapshotTimer += dt; if (snapshotTimer >= 20 && !dissolving) { snapshotTimer = 0; rings[world].capture(L, simClock); }
+    if (!window.__flow.skipRender) worlds.render({ palette: out.targets.palette, hue: out.targets.hue, sat: axes.saturation, pulse: out.pulse, simTime, intensity: 0.8 });
+    timing.step = t1 - t0; timing.steps = steps; timing.render = performance.now() - t1; timing.dt = dt;
+  }
+  if (window.__flow.skipRender) { if (now - lastHUD > 0.15) { lastHUD = now; updateHUD(out, frames, L); } return; }
+  if (!renderer.xr.isPresenting) {
+    if (ship.mode === 'ship') { camera.position.set(0, 0, 0); camera.rotation.set(ship.pitch * RAD, ship.yaw * RAD, ship.roll * RAD, 'YXZ'); }
+    else if (zoom < 0.1) { camera.position.set(0, 0, 0); camera.rotation.set(pitch, orbit, 0, 'YXZ'); }
+    else { const a = orbit + simTime * 0.025; camera.position.set(Math.sin(a) * zoom, Math.sin(pitch) * zoom, Math.cos(a) * zoom); camera.lookAt(0, 0, 0); }
+  }
+  if (renderer.xr.isPresenting) renderer.render(scene, camera);
+  else post.render(scene, camera, { fold: jump ? 8 : out.targets.S, feedback: Math.min(1, out.targets.F + (jump ? 0.3 : 0)), pulse: out.pulse, dt, fadeSeconds: Math.min(8, 16 * 60 / Math.max(60, out.hud.bpm)) });
+  if (now - lastHUD > 0.15) { lastHUD = now; updateHUD(out, frames, L); }
+  if (!$('explain').hidden && now - lastExplain > 0.5) { lastExplain = now; updateExplain(out, L); }
+}
+function updateHUD(out, frames, L) {
+  const bars = $('meters').querySelectorAll('i');
+  [musicF.bands.bass, musicF.bands.mid, musicF.bands.high].forEach((v, i) => bars[i].style.height = (2 + v * 38) + 'px');
+  $('phaseDot').style.opacity = (0.15 + 0.85 * out.pulse).toFixed(2);
+  $('roomDot').style.opacity = frames.room ? (0.15 + 0.85 * Math.max(roomF.speech, roomF.onset)).toFixed(2) : '0.05';
+  $('stats').textContent = (frames.music ? `${frames.source.toUpperCase()} · B ${musicF.bands.bass.toFixed(2)} M ${musicF.bands.mid.toFixed(2)} H ${musicF.bands.high.toFixed(2)}` : '') + ` · ${Math.round(fps)} fps`;
+  if (autoInitiative) placeDot(out.I); else placeDot(director.initiative.I);
+  const sound = audio.context && audio.context.state === 'running';
+  const sign = out.I >= 0 ? '+' : '';
+  let line = `${out.hud.leading} ${sign}${out.I.toFixed(2)}`;
+  if (ship.mode === 'hover') line += ' · tap to launch';
+  if (!sound && !audio.synthetic) line += ' · tap to start sound';
+  else if (frames.music) line += ` · ${Math.round(out.hud.bpm)} BPM · C ${out.hud.C.toFixed(2)}`;
+  line += ` · life ${L.toFixed(2)}` + (out.heat > 0 ? ` · heat +${out.heat.toFixed(2)}` : '') + (dissolving ? ' · REWIND' : '') + (jump ? ' · JUMP' : '');
+  line += navigator.onLine && jev.enabled ? ' · JEV' : ' · LOCAL';
+  $('hud').textContent = line;
+}
+function updateExplain(out, L) {
+  const src = out.hud.source, cls = s => `<dd class="${s}">${s}</dd>`, axes = depthToAxes(depth);
+  const life = world === 'life' ? `<p>Life: ${sims.life.pure ? 'pure B3/S23, no perturbation' : `creative variant · ${sims.life.perturbations} random births so far`}</p>` : '';
+  $('explain').innerHTML = `<h3>WHO IS STEERING</h3><dl>
+<dt>H entropy</dt>${cls(src.H)}<dt>T tempo</dt>${cls(src.T)}<dt>D density</dt>${cls(src.D)}<dt>S fold</dt>${cls(src.S)}<dt>F feedback</dt>${cls(src.F)}<dt>P palette</dt>${cls(src.P)}</dl>
+<p>Initiative ${out.I.toFixed(2)} (${autoInitiative ? 'auto, baseline ' + director.initiative.I0.toFixed(1) : 'locked'}) · agency ${out.As.toFixed(2)}<br>Arc ${out.hud.arc} · waypoint ${out.hud.waypoint + 1}${director.arcs.pinned ? ' · pinned' : ''}<br>Entropy target ${out.hTarget.toFixed(2)} ± ${out.hWidth.toFixed(2)} → ${out.targets.H.toFixed(2)} · heat +${out.heat.toFixed(2)}<br>Liveliness ${L.toFixed(2)} (ref ${liveliness.reference(world).toFixed(3)}) · snapshots ${rings[world].count} · ${rewindNote || 'no rewind yet'}<br>Ship ${ship.mode} · ${ship.speed.toFixed(1)} u/s · ${ship.diving ? 'DIVING' : 'level'} · yaw ${ship.yaw.toFixed(0)}° pitch ${ship.pitch.toFixed(0)}° roll ${ship.roll.toFixed(0)}°${jump ? ' · jump ' + jump.t.toFixed(1) + ' s' : ''}<br>Depth ${depth.toFixed(2)} → fold ${axes.fold} · feedback ${axes.feedback.toFixed(2)} · sat ×${axes.saturation.toFixed(2)} · speed ×${axes.speed.toFixed(2)}<br>Beat ${Math.round(out.hud.bpm)} BPM · coherence ${out.hud.C.toFixed(2)} · world phase ${out.I >= 0 ? 'ahead' : 'behind'} by ${Math.round(Math.abs(out.I) * 0.12 * 60000 / Math.max(60, out.hud.bpm))} ms<br>Novelty budget ${director.N.toFixed(2)}</p>
+<p>${WORLDS[world][3]}</p>${life}`;
+}
 
 // ---------- network, offline, XR, cleanup ----------
 function network() { $('network').textContent = navigator.onLine ? 'LOCAL ENGINE · ONLINE AVAILABLE' : 'OFFLINE · LOCAL DIRECTOR'; }
@@ -492,7 +508,7 @@ async function setupXR() {
       if (xrSession) { await xrSession.end(); return; }
       try {
         xrSession = await navigator.xr.requestSession('immersive-vr', { optionalFeatures: ['local-floor'] });
-        camera.position.set(0, 1.6, 0); camera.rotation.set(0, 0, 0); await renderer.xr.setSession(xrSession); $('vr').textContent = 'Leave VR';
+        setShipMode('hover'); camera.position.set(0, 1.6, 0); camera.rotation.set(0, 0, 0); await renderer.xr.setSession(xrSession); $('vr').textContent = 'Leave VR';
         xrSession.addEventListener('end', () => { xrSession = null; $('vr').textContent = 'Enter Quest VR'; camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); });
       } catch { xrSession = null; $('vr').textContent = 'VR did not start, retry'; }
     };
@@ -501,6 +517,10 @@ async function setupXR() {
 setupXR();
 for (let i = 0; i < 2; i++) {
   const controller = renderer.xr.getController(i); scene.add(controller);
-  controller.addEventListener('selectstart', () => { gestureCount++; if (i === 0) { const ids = Object.keys(WORLDS); choose(ids[(ids.indexOf(world) + 1) % ids.length]); } else setPause(!paused); });
+  controller.addEventListener('selectstart', () => { gestureCount++; if (i === 0) act({ type: 'swipe', dir: 'left' }); else setShipMode(ship.mode === 'ship' ? 'hover' : 'ship'); });
 }
-addEventListener('pagehide', () => { recognition?.stop(); player.pause(); audio.close(); renderer.setAnimationLoop(null); clean(); post.dispose(); texture.dispose(); tunnelTexture.dispose(); haloTexture.dispose(); starsG.dispose(); renderer.dispose(); });
+addEventListener('pagehide', () => { recognition?.stop(); player.pause(); audio.close(); renderer.setAnimationLoop(null); worlds.dispose(); post.dispose(); renderer.dispose(); });
+
+// ---------- start ----------
+choose(world); setAuto(true); setShipMode('hover'); placeDot(director.initiative.I); setDepth(depth);
+renderer.setAnimationLoop(animate);

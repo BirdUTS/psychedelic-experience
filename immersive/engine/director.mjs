@@ -29,10 +29,15 @@ export class Director {
     this.prevWorldPhase = 0;
   }
 
+  // A person's own request (swipe, key): honoured at the next phrase boundary when the world leads,
+  // at once when it follows (I ≤ −0.5), never while the scene is locked. Bypasses dwell and agency gates.
+  requestScene(name) { this.userSceneRequest = name && name !== this.scene ? name : null; }
+
   acknowledgeScene(name) {
     if (name) this.scene = name;
     this.sceneAge = 0;
     if (this.jevSceneRequest === this.scene) this.jevSceneRequest = null;
+    if (this.userSceneRequest === this.scene) this.userSceneRequest = null;
     this.heat = 0; this.heating = false; this.belowSince = null; this.deepSince = null;   // a new world starts with a clean metabolism
   }
 
@@ -146,7 +151,9 @@ export class Director {
     this.sceneAge += dt;
     const request = this.jevSceneRequest && this.jevSceneRequest !== this.scene ? this.jevSceneRequest : this.arcs.sceneRequest;
     let sceneChange = null;
-    if (request && request !== this.scene && I > 0.2 && As < 0.25 && !user.sceneLocked && phraseBoundary && this.sceneAge >= this.dwell) {
+    if (this.userSceneRequest && this.userSceneRequest !== this.scene && !user.sceneLocked && (phraseBoundary || I <= -0.5)) {
+      sceneChange = this.userSceneRequest; this.userSceneRequest = null; this.sceneAge = 0;
+    } else if (request && request !== this.scene && I > 0.2 && As < 0.25 && !user.sceneLocked && phraseBoundary && this.sceneAge >= this.dwell) {
       sceneChange = request; this.sceneAge = 0;
     }
 

@@ -1,30 +1,31 @@
-<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#05070c"><title>EXTRA / Living Worlds · Flow</title><link rel="stylesheet" href="style.css"></head><body>
-<main id="stage" aria-label="Emergent worlds in 3D"></main><div class="veil"></div>
-<header><a href="../extra-math-lab.html" title="Original math lab">E X T R A</a><span>LIVING WORLDS / 003 · FLOW WITH MIND</span><div id="network">LOCAL ENGINE</div></header>
-<section class="intro"><div class="micro" id="chapter">01 / MYCELIAL INTELLIGENCE</div><h1 id="worldTitle">The world<br>weaves itself.</h1><p id="worldHint">Every path remembers another path.</p></section>
-<aside id="panel">
-<div class="micro">INITIATIVE · WHO LEADS</div>
-<div class="initiative"><span>Lead me</span><input id="initiative" type="range" min="-1" max="1" step=".01" value=".3" aria-label="Initiative, from lead me to follow me"><span>Follow me</span></div>
-<div class="row"><button id="initiativeAuto" aria-pressed="true">Auto: on</button><button id="passLead">Pass the lead</button></div>
-<p class="note">On Auto the world yields when you act and carries you when you rest. Touch the slider to lock it.</p>
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="theme-color" content="#05070c"><title>EXTRA / Living Worlds · Flow</title><link rel="stylesheet" href="style.css"></head><body>
+<main id="stage" aria-label="Emergent worlds you travel through"></main>
+<header class="fades"><a href="../extra-math-lab.html" title="Original math lab">E X T R A</a><span>LIVING WORLDS / 004 · FLOW WITH MIND</span><div id="network">LOCAL ENGINE</div></header>
+<section class="intro fades"><div class="micro" id="chapter">01 / MYCELIAL INTELLIGENCE</div><h1 id="worldTitle">The world<br>weaves itself.</h1><p id="worldHint">Every path remembers another path.</p></section>
+<!-- The play surface: one ring, a HUD line, a gear. Everything else lives in the drawer. -->
+<div id="ring" class="fades" role="slider" aria-label="Initiative: lead me to follow me" aria-valuemin="-1" aria-valuemax="1" aria-valuenow="0.3" tabindex="0">
+<svg viewBox="0 0 400 120" aria-hidden="true"><path id="ringTrack" d="M 30 100 A 170 170 0 0 1 370 100" fill="none"/><path id="ringGlow" d="M 30 100 A 170 170 0 0 1 370 100" fill="none"/><circle id="ringDot" cx="200" cy="30" r="9"/></svg>
+<span class="ringLabel left">Lead me</span><span class="ringLabel right">Follow me</span><span id="ringMode" class="ringLabel mode">auto</span>
+</div>
+<div id="depthHint" aria-hidden="true"><i></i></div>
+<div id="hud" class="fades" aria-live="polite">tap to launch</div>
+<button id="gear" class="fades" aria-label="Setup" title="Setup (Esc)">⚙</button>
+<input id="depth" type="range" min="0" max="1" step=".05" value=".5" class="sr" aria-label="Depth">
+<aside id="drawer" hidden aria-label="Setup">
+<div class="row head"><div class="micro">SETUP · PRESS ESC TO CLOSE</div><button id="closeDrawer" aria-label="Close">×</button></div>
+<div class="row"><button id="hoverToggle" aria-pressed="true">Hover: on</button><button id="pause" aria-pressed="false">Pause</button><button id="explainToggle" aria-pressed="false">Explain</button></div>
 <div class="micro divider">WORLD</div>
 <div class="worlds">
-<button data-world="physarum" class="selected" aria-pressed="true"><b>01</b><span>Mycelial network<small>Physarum · trails and exploration</small></span></button>
+<button data-world="physarum" class="selected" aria-pressed="true"><b>01</b><span>Mycelial network<small>Physarum · trails chasing food</small></span></button>
 <button data-world="swarm" aria-pressed="false"><b>02</b><span>Firefly resonance<small>Swarmalators · swarm and synchrony</small></span></button>
-<button data-world="boids" aria-pressed="false"><b>03</b><span>Ocean of motion<small>Boids · separation, alignment, cohesion</small></span></button>
+<button data-world="boids" aria-pressed="false"><b>03</b><span>Ocean of motion<small>Boids · the flock streams past</small></span></button>
 <button data-world="life" aria-pressed="false"><b>04</b><span>Cellular cosmos<small>Conway · B3 / S23</small></span></button>
 </div>
-<div class="row"><button id="lockScene" aria-pressed="false">Lock scene: off</button><button id="reset">Reseed</button></div>
+<div class="row"><button id="lockScene" aria-pressed="false">Lock scene: off</button><button id="rewind">Rewind</button><button id="reset">Reseed</button></div>
 <label>Arc<select id="arc"><option value="auto">Auto chain · Tidal → Firefly → Mycelium</option><option value="tidal">Tidal · calm → swell → release</option><option value="firefly">Firefly · groove, synchrony</option><option value="mycelium">Mycelium · peak</option></select></label>
 <button id="pinArc" class="small" aria-pressed="false">Pin arc: off</button>
-<label>Viewpoint<select id="view"><option value="orbit">Orbit</option><option value="inside">Inside</option><option value="close">Close</option><option value="flight">Forward flight</option></select></label>
 <label>Flock skin<select id="skin"><option value="fish">Glowing fish</option><option value="birds">Geometric birds</option><option value="lights">Pure lights</option></select></label>
-<label>Intensity <output id="intensityOut">0.80</output><input id="intensity" type="range" min="0" max="1.5" value=".8" step=".05"></label>
-<label>Speed <output id="speedOut">1.00×</output><input id="speed" type="range" min="0" max="2" value="1" step=".05"></label>
-<label>Symmetry<select id="symmetry"><option value="0">None</option><option value="2">2-fold mirror</option><option value="4">4-fold</option><option value="6">6-fold</option><option value="8">8-fold</option></select></label>
-<label>Feedback <output id="feedbackOut">0.30</output><input id="feedback" type="range" min="0" max="1" value=".3" step=".05"></label>
-<label>Hue shift<input id="hue" type="range" min="0" max="360" value="0"></label>
-<label class="check"><input id="lifePure" type="checkbox"> Life: pure B3/S23, no perturbation</label>
+<label class="check"><input id="lifePure" type="checkbox"> Life: pure B3/S23 (no perturbation, rewind reseeds)</label>
 <div class="micro divider">SOUND</div>
 <select id="track" aria-label="Demo track"><option value="">Loading Suno demos…</option></select>
 <div class="row"><button id="playSong">Play / pause</button><button id="playlistAuto" aria-pressed="true">Auto-advance: on</button><button id="playlistLoop" aria-pressed="true">Loop: on</button></div>
@@ -32,14 +33,17 @@
 <div class="row"><button id="roomMic" aria-pressed="false">Room mic: off</button><button id="synthetic" aria-pressed="false">Synthetic beat: off</button></div>
 <p id="audioStatus" role="status">No sound source yet. Pick a demo, turn on the room mic, or use the labelled synthetic beat.</p>
 <div class="micro divider">DIRECTOR · OPTIONAL ONLINE</div>
-<div class="row"><button id="jev" disabled title="Online director arrives in a later step">JEV: off</button><button id="listen">Say a request</button></div>
+<div class="row"><button id="jev" aria-pressed="false">JEV: off</button><button id="listen">Say a request</button></div>
 <form id="commandForm"><input id="command" placeholder="e.g. surround me · slower · warmer · hold" maxlength="180" aria-label="Request"><button>Send</button></form>
 <p id="decision" role="status">Local director running. Works with no network.</p>
 <button id="offline">Download offline assets</button><p id="offlineStatus" role="status">Download once before going offline.</p>
+<div class="micro divider">GESTURES</div>
+<p class="note">tap launch / pulse · drag steer · swipe ← → world · swipe ↑ ↓ depth · long-press hold · two-finger tap or shake rewind · pinch speed · long-press ring hover · double-tap ring pass the lead · keys: Space [ ] + − H R V P Esc</p>
+<section id="explain" hidden aria-label="What is steering the world"></section>
+<div class="row"><button id="vr" disabled>Checking VR…</button><button id="hide">Immerse</button></div>
 <a class="legacy" href="../extra-math-lab.html">↗ Original math lab</a>
 </aside>
-<nav><button id="pause">Pause</button><button id="hide">Immerse</button><button id="explainToggle" aria-pressed="false">Explain</button><button id="vr" disabled>Checking VR…</button></nav>
-<section id="explain" hidden aria-label="What is steering the world"></section>
-<footer><div><div id="hud" aria-live="polite">tap to start sound</div><p id="rule">sense trail → turn → deposit → diffuse and decay</p></div><div id="meters"><i></i><i></i><i></i><b id="phaseDot" title="world beat"></b><b id="roomDot" title="room activity"></b><span id="stats">BASS / MID / HIGH</span></div></footer>
+<div id="meters" class="fades"><i></i><i></i><i></i><b id="phaseDot" title="world beat"></b><b id="roomDot" title="room activity"></b><span id="stats"></span></div>
+<p id="rule" class="fades">sense trail → turn → deposit → diffuse and decay</p>
 <div id="error" role="alert" hidden></div>
 <script type="module" src="app.mjs"></script></body></html>
