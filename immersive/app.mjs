@@ -77,7 +77,7 @@ let calm = false, quality = 1, lowFpsFor = 0, highFpsFor = 0, programStarted = f
 window.__flow = {
   director, audio, sims, worlds, ship, liveliness, rings, timing, jev, gestures, post, program, target, current, visualGestures,
   forceProgram: null,   // a partial program merged over the computed one (checks)
-  get calm() { return calm; }, set calm(v) { calm = !!v; }, get quality() { return quality; },
+  get calm() { return calm; }, set calm(v) { calm = !!v; $('calm').checked = calm; }, get quality() { return quality; }, immerse,
   get musicF() { return musicF; }, get roomF() { return roomF; }, get depth() { return depth; }, set depth(v) { setDepth(v); },
   forceLiveliness: null, skipRender: false,
   get jump() { return jump; }, get world() { return world; }, get dissolving() { return dissolving; },
@@ -250,7 +250,7 @@ addEventListener('keydown', e => {
     case 'h': case 'H': toggleLock(); break; case 'r': case 'R': rewind('key'); break;
     case 'v': case 'V': setShipMode(ship.mode === 'ship' ? 'hover' : 'ship'); break;
     case 'p': case 'P': setPause(!paused); break;
-    case 'Escape': toggleDrawer(); break;
+    case 'Escape': if (!document.fullscreenElement) toggleDrawer(); break;   // in fullscreen the browser's Esc leaves it first
   }
 });
 const wake = () => { audio.resume(); };
@@ -278,7 +278,21 @@ $('skin').onchange = () => { if (world === 'boids') worlds.build(world, ship.mod
 $('lifePure').onchange = () => { sims.life.pure = $('lifePure').checked; };
 function setPause(v) { paused = v; $('pause').textContent = v ? 'Resume' : 'Pause'; $('pause').setAttribute('aria-pressed', String(v)); }
 setPause(paused); $('pause').onclick = () => setPause(!paused);
-$('hide').onclick = () => { document.body.classList.toggle('immersed'); $('hide').textContent = document.body.classList.contains('immersed') ? 'Show titles' : 'Immerse'; };
+// Immerse: the one obvious control (v3 §6). First use asks for fullscreen, hides titles and meters, and turns the
+// pill into a corner glyph; the glyph toggles. Browser Esc leaves fullscreen; fullscreenchange keeps the body in step.
+async function immerse(on) {
+  const b = $('immerse');
+  if (!b.classList.contains('used')) { b.classList.add('used'); document.body.classList.add('immerseUsed'); b.textContent = '▣'; b.setAttribute('aria-label', 'Immerse'); }
+  document.body.classList.toggle('immersed', on);
+  try {
+    if (on && !document.fullscreenElement) await document.documentElement.requestFullscreen({ navigationUI: 'hide' });
+    else if (!on && document.fullscreenElement) await document.exitFullscreen();
+  } catch { /* fullscreen refused (embedded page, policy): titles still hide, the glyph still toggles */ }
+  touch();
+}
+$('immerse').onclick = () => immerse(!document.body.classList.contains('immersed'));
+document.addEventListener('fullscreenchange', () => { if (!document.fullscreenElement) document.body.classList.remove('immersed'); });
+$('calm').onchange = () => { calm = $('calm').checked; bump(); touch(); };
 $('explainToggle').onclick = () => { const on = $('explain').hidden; $('explain').hidden = !on; $('explainToggle').setAttribute('aria-pressed', String(on)); };
 addEventListener('resize', () => { camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); renderer.setSize(innerWidth, innerHeight); renderer.getDrawingBufferSize(drawSize); post.setSize(drawSize.x, drawSize.y); });
 

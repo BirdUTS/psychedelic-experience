@@ -18,7 +18,12 @@ h1{font:italic 48px Georgia,serif;margin:15px 0}p{color:var(--muted);font-size:1
 #ringDot{fill:var(--mint);filter:drop-shadow(0 0 8px var(--mint))}body.locked #ringDot{fill:#fff}
 .ringLabel{position:absolute;bottom:4px;font:10px monospace;letter-spacing:2px;color:var(--muted)}.ringLabel.left{left:0}.ringLabel.right{right:0}.ringLabel.mode{left:50%;transform:translateX(-50%);bottom:-14px;color:var(--mint)}
 #depthHint{position:fixed;right:18px;top:50%;height:40vh;width:4px;transform:translateY(-50%);background:#ffffff14;border-radius:2px;opacity:0;transition:opacity .4s}#depthHint.show{opacity:1}#depthHint i{position:absolute;left:-3px;width:10px;height:10px;border-radius:50%;background:var(--mint);bottom:50%}
-#hud{position:fixed;left:50%;bottom:172px;transform:translateX(-50%);font:11px monospace;letter-spacing:1px;color:var(--mint);min-height:16px;text-align:center;white-space:nowrap;pointer-events:none}
+#hud{position:fixed;left:50%;bottom:244px;transform:translateX(-50%);font:11px monospace;letter-spacing:1px;color:var(--mint);min-height:16px;text-align:center;white-space:nowrap;pointer-events:none}
+body.immerseUsed #hud{bottom:172px}
+/* Immerse: the one obvious control — a big pill where the hand lands; after its first use, a corner glyph by the gear. */
+#immerse{position:fixed;left:50%;bottom:196px;transform:translateX(-50%);padding:12px 26px;border-radius:999px;border:1px solid var(--mint);background:var(--mint);color:#05070c;font:600 14px system-ui,sans-serif;letter-spacing:1px;box-shadow:0 0 26px #bcead566;cursor:pointer;z-index:3}#immerse:hover{background:#d8f5e8}
+#immerse.used{left:auto;right:72px;top:22px;bottom:auto;transform:none;width:38px;height:38px;padding:0;border-radius:50%;background:#07111caa;color:var(--muted);border-color:var(--line);box-shadow:none;font-size:15px;letter-spacing:0}#immerse.used:hover{border-color:var(--mint);color:var(--mint)}body.immersed #immerse.used{color:var(--mint);border-color:#bcead57a}
+.check{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--muted);margin-top:10px;cursor:pointer}.check input{accent-color:var(--mint)}
 #gear{position:fixed;top:22px;right:26px;width:38px;height:38px;border-radius:50%;border:1px solid var(--line);background:#07111caa;color:var(--muted);font-size:17px;cursor:pointer}#gear:hover{border-color:var(--mint);color:var(--mint)}
 #meters{position:fixed;right:30px;bottom:26px;display:flex;align-items:end;gap:5px;height:40px;pointer-events:none}#meters i{width:8px;background:var(--mint);height:2px;border-radius:2px}
 #stats{font:10px monospace;color:var(--muted);max-width:220px;margin-left:10px}
@@ -44,4 +49,4 @@ form{display:flex;margin-top:12px;gap:5px}form input{min-width:0;width:100%;back
 #explain .you{color:var(--mint)}#explain .arc{color:#c9b6ff}#explain .jev{color:var(--amber)}#explain .music{color:#8fd3ff}
 #error{position:fixed;inset:30%;background:#152030;padding:25px;z-index:20}
 .immersed header,.immersed .intro,.immersed #meters,.immersed #rule{display:none}
-@media(max-width:850px){.intro{left:20px;top:90px;max-width:70vw}h1{font-size:30px}header{padding:18px}header span{display:none}#rule{display:none}#meters{right:16px;bottom:16px}#hud{bottom:160px;font-size:10px;white-space:normal;max-width:90vw}}
+@media(max-width:850px){.intro{left:20px;top:90px;max-width:70vw}h1{font-size:30px}header{padding:18px}header span{display:none}#rule{display:none}#meters{right:16px;bottom:16px}#hud{bottom:230px;font-size:10px;white-space:normal;max-width:90vw}body.immerseUsed #hud{bottom:160px}#immerse{bottom:184px}#immerse.used{right:66px}}

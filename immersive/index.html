@@ -9,6 +9,7 @@
 </div>
 <div id="depthHint" aria-hidden="true"><i></i></div>
 <div id="hud" class="fades" aria-live="polite">tap to launch</div>
+<button id="immerse" class="fades" title="Immerse: fullscreen, titles off">▣ Immerse</button>
 <button id="gear" class="fades" aria-label="Setup" title="Setup (Esc)">⚙</button>
 <input id="depth" type="range" min="0" max="1" step=".05" value=".5" class="sr" aria-label="Depth">
 <aside id="drawer" hidden aria-label="Setup">
@@ -37,10 +38,12 @@
 <form id="commandForm"><input id="command" placeholder="e.g. surround me · slower · warmer · hold" maxlength="180" aria-label="Request"><button>Send</button></form>
 <p id="decision" role="status">Local director running. Works with no network.</p>
 <button id="offline">Download offline assets</button><p id="offlineStatus" role="status">Download once before going offline.</p>
+<div class="micro divider">PICTURE</div>
+<label class="check"><input type="checkbox" id="calm"> Calm · cap intensity, no colour flashes</label>
 <div class="micro divider">GESTURES</div>
 <p class="note">tap launch / pulse · drag steer · swipe ← → world · swipe ↑ ↓ depth · long-press hold · two-finger tap or shake rewind · pinch speed · long-press ring hover · double-tap ring pass the lead · keys: Space [ ] + − H R V P Esc</p>
 <section id="explain" hidden aria-label="What is steering the world"></section>
-<div class="row"><button id="vr" disabled>Checking VR…</button><button id="hide">Immerse</button></div>
+<div class="row"><button id="vr" disabled>Checking VR…</button></div>
 <a class="legacy" href="../extra-math-lab.html">↗ Original math lab</a>
 </aside>
 <div id="meters" class="fades"><i></i><i></i><i></i><b id="phaseDot" title="world beat"></b><b id="roomDot" title="room activity"></b><span id="stats"></span></div>
