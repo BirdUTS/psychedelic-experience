@@ -1,6 +1,7 @@
-/* Dual-stream audio graph. The in-app player and the room microphone may run at the same time:
-   the player (or the mic when nothing plays) is the MUSIC stream; the mic alongside a playing track is the ROOM stream.
-   The microphone is analysed only, never routed to the speakers. One AudioContext for the page. */
+/* Dual-stream audio graph. Computer music (a shared tab or the system audio via getDisplayMedia), the in-app
+   player and the room microphone may run at the same time: computer music, else the player, else the mic is the
+   MUSIC stream; the mic alongside playing music is the ROOM stream. Captured audio is analysed only — never routed
+   to the speakers, never recorded or uploaded. One AudioContext for the page. */
 const FFT = 2048, SMOOTHING = 0.55;
 
 export class AudioGraph {
@@ -9,6 +10,7 @@ export class AudioGraph {
     this.context = null;
     this.playerSource = null; this.playerAnalyser = null;
     this.micStream = null; this.micSource = null; this.micAnalyser = null; this.micOn = false;
+    this.systemStream = null; this.systemSource = null; this.systemAnalyser = null; this.systemOn = false; this.onSystemEnded = null;
     this.synthetic = false;
     this.musicBins = new Uint8Array(FFT / 2); this.roomBins = new Uint8Array(FFT / 2); this.synthBins = new Uint8Array(FFT / 2);
   }
@@ -51,11 +53,45 @@ export class AudioGraph {
     this.micSource?.disconnect();
     this.micStream = null; this.micSource = null; this.micAnalyser = null; this.micOn = false;
   }
+  // Computer music: Chrome's display capture with audio. The picture is never used (its tracks stop at once);
+  // the audio track feeds an analyser only. Chrome 141+ on macOS 14.2+ offers system audio under "Entire screen";
+  // any Chrome can share one tab's audio. Must be called from a user gesture.
+  async startSystem() {
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getDisplayMedia) return { ok: false, reason: 'unsupported' };
+    let stream;
+    try {
+      this.ensureContext(); await this.resume();
+      stream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: { suppressLocalAudioPlayback: false } });
+    } catch (e) {
+      const name = e && e.name;
+      return { ok: false, reason: name === 'NotAllowedError' || name === 'AbortError' || name === 'NotFoundError' ? 'cancelled' : 'unsupported' };
+    }
+    for (const t of stream.getVideoTracks()) t.stop();
+    const audioTracks = stream.getAudioTracks();
+    if (!audioTracks.length) { for (const t of stream.getTracks()) t.stop(); return { ok: false, reason: 'no-audio' }; }
+    this.stopSystem();
+    const c = this.ensureContext();
+    this.systemStream = new MediaStream(audioTracks);
+    this.systemSource = c.createMediaStreamSource(this.systemStream);
+    this.systemAnalyser = this.analyser();
+    this.systemSource.connect(this.systemAnalyser);   // analysed only, never connected to the destination
+    for (const t of audioTracks) t.addEventListener('ended', () => { if (this.systemOn) { this.stopSystem(); this.onSystemEnded?.(); } });
+    this.systemOn = true;
+    return { ok: true };
+  }
+  stopSystem() {
+    this.systemStream?.getTracks().forEach(t => t.stop());
+    this.systemSource?.disconnect();
+    this.systemStream = null; this.systemSource = null; this.systemAnalyser = null; this.systemOn = false;
+  }
   setSynthetic(on) { this.synthetic = !!on; }
   get playing() { return !!this.playerSource && !this.player.paused && !this.player.ended && this.player.readyState >= 2; }
   frames(time = 0) {
     let music = null, room = null, source = 'none';
-    if (this.playing) {
+    if (this.systemOn) {
+      this.systemAnalyser.getByteFrequencyData(this.musicBins); music = this.musicBins; source = 'system';
+      if (this.micOn) { this.micAnalyser.getByteFrequencyData(this.roomBins); room = this.roomBins; }
+    } else if (this.playing) {
       this.playerAnalyser.getByteFrequencyData(this.musicBins); music = this.musicBins; source = 'player';
       if (this.micOn) { this.micAnalyser.getByteFrequencyData(this.roomBins); room = this.roomBins; }
     } else if (this.micOn) {
@@ -82,7 +118,8 @@ export class AudioGraph {
     const c = this.context, sr = c ? c.sampleRate : 48000;
     const analyser = (FFT / 2) / sr + 1 / 60;
     const output = c ? (c.baseLatency || 0) + (c.outputLatency || 0) : 0;
-    return { music: analyser + (this.playing ? output : 0), room: analyser };
+    // Computer music is heard through the OS, not this context: only the analyser's own delay is known.
+    return { music: analyser + (this.playing && !this.systemOn ? output : 0), room: analyser };
   }
-  close() { this.stopMic(); try { this.context?.close(); } catch { /* already closed */ } }
+  close() { this.stopMic(); this.stopSystem(); try { this.context?.close(); } catch { /* already closed */ } }
 }

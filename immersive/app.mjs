@@ -315,6 +315,21 @@ $('playSong').onclick = () => {
 $('playlistAuto').onclick = () => { playlist.auto = !playlist.auto; $('playlistAuto').textContent = 'Auto-advance: ' + (playlist.auto ? 'on' : 'off'); $('playlistAuto').setAttribute('aria-pressed', String(playlist.auto)); };
 $('playlistLoop').onclick = () => { playlist.loop = !playlist.loop; $('playlistLoop').textContent = 'Loop: ' + (playlist.loop ? 'on' : 'off'); $('playlistLoop').setAttribute('aria-pressed', String(playlist.loop)); };
 tracks();
+const SHARE_HINT = "Pick a Chrome tab and tick 'Share tab audio', or 'Entire screen' with 'Share system audio' (Chrome 141+ on macOS 14.2+).";
+let systemBusy = false;
+$('systemAudio').onclick = async () => {
+  if (systemBusy) return;
+  if (audio.systemOn) { audio.stopSystem(); systemLabel(); bump(); $('audioStatus').textContent = 'Computer music off.'; return; }
+  systemBusy = true; $('systemAudio').disabled = true; $('audioStatus').textContent = 'Choose what to share…';
+  const r = await audio.startSystem();
+  systemBusy = false; $('systemAudio').disabled = false; systemLabel(); bump();
+  if (r.ok) { player.pause(); $('audioStatus').textContent = 'Computer music → analysed live, never recorded or uploaded' + (audio.micOn ? ' · room mic listening alongside.' : '.'); }
+  else if (r.reason === 'unsupported') $('audioStatus').textContent = 'Computer music needs Chrome (a shared tab on any version; system audio on 141+ with macOS 14.2+). ' + SHARE_HINT;
+  else if (r.reason === 'no-audio') $('audioStatus').textContent = 'Nothing shared audio. ' + SHARE_HINT;
+  else $('audioStatus').textContent = 'Sharing cancelled. ' + SHARE_HINT;
+};
+function systemLabel() { $('systemAudio').textContent = 'Computer music: ' + (audio.systemOn ? 'on' : 'off'); $('systemAudio').setAttribute('aria-pressed', String(audio.systemOn)); }
+audio.onSystemEnded = () => { systemLabel(); bump(); $('audioStatus').textContent = 'Computer music stopped: sharing ended. ' + SHARE_HINT; };
 let micBusy = false;
 $('roomMic').onclick = async () => {
   if (micBusy) return;
