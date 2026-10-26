@@ -14,6 +14,7 @@ import { Playlist } from './engine/playlist.mjs';
 import { PostFX } from './engine/post.mjs';
 import { defaultProgram, programFor, applyMood, capProgram, CONTINUOUS, DISCRETE } from './engine/grammar.mjs';
 import { Phases } from './engine/phases.mjs';
+import { Passages } from './engine/passages.mjs';
 import { VisualGestures } from './engine/visual-gestures.mjs';
 import { JevClient, buildState } from './engine/jev-client.mjs';
 import { directorInput } from './engine/streams.mjs';
@@ -46,7 +47,7 @@ const clock = new THREE.Clock();
 const drawSize = renderer.getDrawingBufferSize(new THREE.Vector2());
 const post = new PostFX(renderer, { width: drawSize.x, height: drawSize.y });
 const program = defaultProgram(), target = defaultProgram(), current = defaultProgram();   // rendered / grammar target / time-blended
-const visualGestures = new VisualGestures(), phases = new Phases();
+const visualGestures = new VisualGestures(), phases = new Phases(), passages = new Passages();
 
 // ---------- engine ----------
 const sims = { physarum: new Physarum(), swarm: new Swarmalators(), boids: new Boids(), life: new Life(64, 1) };
@@ -74,9 +75,9 @@ let dissolving = null, jump = null, snapshotTimer = 0, rewindNote = '', fps = 60
 const summary = { E30: 0, E5: 0, C30: 0, B30: 0, A30: 0 }, recentDecisions = [];
 let lastJevAsk = -Infinity;
 const timing = { step: 0, steps: 0, render: 0, post: 0, dt: 0 };
-let calm = false, quality = 1, lowFpsFor = 0, highFpsFor = 0, programStarted = false, lastGestureEnd = -Infinity, prevGesture = null, rewindFired = false, jumpFired = false, lastJump = false, depthTouched = false, leavingByGlyph = false;
+let calm = false, quality = 1, lowFpsFor = 0, highFpsFor = 0, programStarted = false, lastGestureEnd = -Infinity, prevGesture = null, rewindFired = false, jumpFired = false, lastJump = false, depthTouched = false, leavingByGlyph = false, landedFired = false;
 window.__flow = {
-  director, audio, sims, worlds, ship, liveliness, rings, timing, jev, gestures, post, program, target, current, visualGestures, phases,
+  director, audio, sims, worlds, ship, liveliness, rings, timing, jev, gestures, post, program, target, current, visualGestures, phases, passages,
   forceProgram: null,   // a partial program merged over the computed one (checks)
   get calm() { return calm; }, set calm(v) { calm = !!v; $('calm').checked = calm; }, get quality() { return quality; }, immerse,
   get musicF() { return musicF; }, get roomF() { return roomF; }, get depth() { return depth; }, set depth(v) { setDepth(v); },
@@ -128,7 +129,7 @@ function updateJump(dt) {
   const u = jump.t < 2 ? jump.t / 2 : (jump.t - 2) / 2;
   group.scale.set(1, 1, jump.t < 2 ? 1 - 0.9 * u : 0.6 + 0.4 * Math.min(1, u));
   if (jump.t >= 4 || (jump.switched && world !== jump.to)) {   // never leave a jump hanging
-    const land = jump.rewindOnLand; jump = null; group.scale.set(1, 1, 1);
+    const land = jump.rewindOnLand; jump = null; group.scale.set(1, 1, 1); landedFired = true;
     if (land) rewind('return');
   }
 }
@@ -523,7 +524,8 @@ function frame(dt) {
   else {
     // v3: the director's state becomes a program (grammar), blended over time; gestures speak on top of it.
     const beatSeconds = 60 / Math.max(60, out.hud.bpm);
-    programFor({ I: out.I, A: out.As, E: out.hud.E, C: out.hud.C, H: out.targets.H, L, heat: out.heat, ship: ship.mode, diving: ship.diving, jump: !!jump, calm }, depth, target);
+    if (!paused) { passages.update({ phrase: out.phraseBoundary, landed: landedFired }); landedFired = false; }
+    programFor({ I: out.I, A: out.As, E: out.hud.E, C: out.hud.C, H: out.targets.H, L, heat: out.heat, ship: ship.mode, diving: ship.diving, jump: !!jump, calm, arcS: out.arcS, world, raw: passages.raw }, depth, target);
     // The arc's F axis biases the echo decay by ±0.2 around the arcs' neutral 0.3. (Its S axis has no room: Depth is
     // both the fold's floor (v2) and its ceiling (v3), so the fold is Depth's whenever the world leads.)
     target.echoDecay = Math.max(0, Math.min(1, target.echoDecay + 0.2 * Math.max(-1, Math.min(1, (out.targets.F - 0.3) / 0.7))));
@@ -551,6 +553,7 @@ function frame(dt) {
     }
     Object.assign(program, window.__flow.forceProgram);
     capProgram(program, depth);   // Depth caps gestures too
+    if (passages.raw && !jump) { program.fold = 0; program.mirror = 'none'; program.formContrast = 0; program.tunnel = 0; }   // a raw passage stays raw under gestures
     if (calm) { program.chromaSplit = 0; program.chromaCycle = 0; program.gain = Math.min(program.gain, 0.5); }   // calm holds against gestures, moods and the debug hook
     if (!paused) phases.advance(dt, program);   // a paused picture holds still
     // Quality drops to half after two seconds under 50 fps and returns after five good seconds.
@@ -578,7 +581,7 @@ function updateHUD(out, frames, L) {
   if (ship.mode === 'hover') line += ' · tap to launch';
   if (!sound && !audio.synthetic) line += ' · tap to start sound';
   else if (frames.music) line += ` · ${Math.round(out.hud.bpm)} BPM · C ${out.hud.C.toFixed(2)}`;
-  line += ` · life ${L.toFixed(2)}` + (out.heat > 0 ? ` · heat +${out.heat.toFixed(2)}` : '') + (dissolving ? ' · REWIND' : '') + (jump ? ' · JUMP' : '') + (ship.diving ? ' · DIVE' : '') + (visualGestures.active ? ' · ' + visualGestures.active.toUpperCase() : '') + (paused ? ' · PAUSED' : '');
+  line += ` · life ${L.toFixed(2)}` + (out.heat > 0 ? ` · heat +${out.heat.toFixed(2)}` : '') + (dissolving ? ' · REWIND' : '') + (jump ? ' · JUMP' : '') + (ship.diving ? ' · DIVE' : '') + (passages.raw && !jump ? ' · RAW' : '') + (visualGestures.active ? ' · ' + visualGestures.active.toUpperCase() : '') + (paused ? ' · PAUSED' : '');
   line += navigator.onLine && jev.enabled ? ' · JEV' : ' · LOCAL';
   $('hud').textContent = line;
 }
@@ -587,7 +590,7 @@ function updateExplain(out, L) {
   const life = world === 'life' ? `<p>Life: ${sims.life.pure ? 'pure B3/S23, no perturbation' : `creative variant · ${sims.life.perturbations} random births so far`}</p>` : '';
   $('explain').innerHTML = `<h3>WHO IS STEERING</h3><dl>
 <dt>H entropy</dt>${cls(src.H)}<dt>T tempo</dt>${cls(src.T)}<dt>D density</dt>${cls(src.D)}<dt>S fold</dt>${cls(src.S)}<dt>F feedback</dt>${cls(src.F)}<dt>P palette</dt>${cls(src.P)}</dl>
-<p>Initiative ${out.I.toFixed(2)} (${autoInitiative ? 'auto, baseline ' + director.initiative.I0.toFixed(1) : 'locked'}) · agency ${out.As.toFixed(2)}<br>Arc ${out.hud.arc} · waypoint ${out.hud.waypoint + 1}${director.arcs.pinned ? ' · pinned' : ''}<br>Entropy target ${out.hTarget.toFixed(2)} ± ${out.hWidth.toFixed(2)} → ${out.targets.H.toFixed(2)} · heat +${out.heat.toFixed(2)}<br>Liveliness ${L.toFixed(2)} (ref ${liveliness.reference(world).toFixed(3)}) · snapshots ${rings[world].count} · ${rewindNote || 'no rewind yet'}<br>Ship ${ship.mode} · ${ship.speed.toFixed(1)} u/s · ${ship.diving ? 'DIVING' : 'level'} · yaw ${ship.yaw.toFixed(0)}° pitch ${ship.pitch.toFixed(0)}° roll ${ship.roll.toFixed(0)}°${jump ? ' · jump ' + jump.t.toFixed(1) + ' s' : ''}<br>Depth ${depth.toFixed(2)} → fold ${axes.fold} · feedback ${axes.feedback.toFixed(2)} · sat ×${axes.saturation.toFixed(2)} · speed ×${axes.speed.toFixed(2)}<br>Beat ${Math.round(out.hud.bpm)} BPM · coherence ${out.hud.C.toFixed(2)} · world phase ${out.I >= 0 ? 'ahead' : 'behind'} by ${Math.round(Math.abs(out.I) * 0.12 * 60000 / Math.max(60, out.hud.bpm))} ms<br>Novelty budget ${director.N.toFixed(2)}<br>Program: forms ${program.formKind} ${program.formDrift >= 0 ? 'in' : 'out'} ${Math.abs(program.formDrift).toFixed(2)} · fold ${program.fold} · mirror ${program.mirror} · warp ${program.warp.toFixed(2)} · tunnel ${program.tunnel.toFixed(2)} · echo ${program.echoDecay.toFixed(2)} · droste ${program.droste.toFixed(2)} · contour ${program.contour.toFixed(2)} · chroma ${program.chromaSplit.toFixed(2)} · quality ${quality}<br>Gesture ${visualGestures.active ? `${visualGestures.active} (${visualGestures.env.toFixed(2)})` : 'none'} · mood ${out.mood ? out.mood + ' (jev)' : 'none'} · arc F ${out.targets.F.toFixed(2)} → echo ±0.2 (fold is Depth's: cap ${FOLDS[Math.round(depth * 4)]})${calm ? ' · CALM' : ''}</p>
+<p>Initiative ${out.I.toFixed(2)} (${autoInitiative ? 'auto, baseline ' + director.initiative.I0.toFixed(1) : 'locked'}) · agency ${out.As.toFixed(2)}<br>Arc ${out.hud.arc} · waypoint ${out.hud.waypoint + 1}${director.arcs.pinned ? ' · pinned' : ''}<br>Entropy target ${out.hTarget.toFixed(2)} ± ${out.hWidth.toFixed(2)} → ${out.targets.H.toFixed(2)} · heat +${out.heat.toFixed(2)}<br>Liveliness ${L.toFixed(2)} (ref ${liveliness.reference(world).toFixed(3)}) · snapshots ${rings[world].count} · ${rewindNote || 'no rewind yet'}<br>Ship ${ship.mode} · ${ship.speed.toFixed(1)} u/s · ${ship.diving ? 'DIVING' : 'level'} · yaw ${ship.yaw.toFixed(0)}° pitch ${ship.pitch.toFixed(0)}° roll ${ship.roll.toFixed(0)}°${jump ? ' · jump ' + jump.t.toFixed(1) + ' s' : ''}<br>Depth ${depth.toFixed(2)} → fold ${axes.fold} · feedback ${axes.feedback.toFixed(2)} · sat ×${axes.saturation.toFixed(2)} · speed ×${axes.speed.toFixed(2)}<br>Beat ${Math.round(out.hud.bpm)} BPM · coherence ${out.hud.C.toFixed(2)} · world phase ${out.I >= 0 ? 'ahead' : 'behind'} by ${Math.round(Math.abs(out.I) * 0.12 * 60000 / Math.max(60, out.hud.bpm))} ms<br>Novelty budget ${director.N.toFixed(2)}<br>Program: forms ${program.formKind} ${program.formDrift >= 0 ? 'in' : 'out'} ${Math.abs(program.formDrift).toFixed(2)} · fold ${program.fold} · mirror ${program.mirror} · warp ${program.warp.toFixed(2)} · tunnel ${program.tunnel.toFixed(2)} · echo ${program.echoDecay.toFixed(2)} · droste ${program.droste.toFixed(2)} · contour ${program.contour.toFixed(2)} · chroma ${program.chromaSplit.toFixed(2)} · quality ${quality}<br>Gesture ${visualGestures.active ? `${visualGestures.active} (${visualGestures.env.toFixed(2)})` : 'none'} · mood ${out.mood ? out.mood + ' (jev)' : 'none'} · passage ${passages.raw ? 'raw (the world itself)' : `dressed ${passages.count + 1}/${passages.dressed}`} · signature ${world} · arc S ${out.arcS} → fold (Depth cap ${FOLDS[Math.round(depth * 4)]}) · arc F ${out.targets.F.toFixed(2)} → echo ±0.2${calm ? ' · CALM' : ''}</p>
 <p>${WORLDS[world][3]}</p>${life}`;
 }
 

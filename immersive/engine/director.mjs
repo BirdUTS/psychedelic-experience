@@ -183,6 +183,7 @@ export class Director {
     return this.lastOut = {
       I, lambda, As, phase: this.beat.phase, worldPhase: this.world.phase, pulse, phraseBoundary, surprise,
       targets: { H, T, D, S, F, palette, hue, camera, omega: lead.omega }, mood: this.mood,
+      arcS: this.committedS ?? 0,   // the arc's own symmetry, without the user's floor (v3: the grammar's fold)
       hTarget, hWidth, sceneChange, injection, request: request1,
       heat: this.heat, rewind, events: { beat, accent, phrase: phraseBoundary },
       liveliness: typeof input.liveliness === 'number' ? input.liveliness : null,

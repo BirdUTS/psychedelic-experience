@@ -33,7 +33,9 @@ export function programFor(state, depth, into = defaultProgram()) {
   p.formDrift = jump ? 1 : clamp(leading ? (0.3 + 0.7 * C) * (diving ? 2.5 : 1) : -(0.2 + 0.3 * C), -1, 1);   // low coherence drifts slowly either way
   p.formDensity = clamp01((0.3 + 0.6 * E) * d * (1 - 0.5 * A));
   p.formContrast = Math.min(0.6, 0.6 * d);
-  p.fold = leading ? foldCap : 0;
+  // The arc carries the fold (v1/v2 waypoints: Tidal opens at 0 and builds); Depth is only its ceiling.
+  const arcS = Number.isFinite(s.arcS) ? s.arcS : foldCap;
+  p.fold = leading ? FOLDS.filter(f => f <= Math.min(foldCap, arcS)).pop() : 0;
   p.mirror = jump ? 'quad' : leading ? 'none' : (A > 0.5 ? 'h' : 'quad');
   const warpBase = (leading ? 0.2 + 0.5 * H : 0.2 + 0.6 * A + 0.3 * H) + 0.5 * heat;
   p.warp = clamp01(Math.min(Math.max(d, 0.1), warpBase));
@@ -47,7 +49,31 @@ export function programFor(state, depth, into = defaultProgram()) {
   p.tunnel = jump ? 1 : hover ? 0 : diving ? 0.7 : 0.3;
   p.tunnelSpeed = jump ? 1 : diving ? 1 : 0.4;
   p.gain = calm ? Math.min(0.5, 0.3 + 0.7 * d) : clamp01(0.3 + 0.7 * d);
+  if (p.fold === 0) p.formContrast *= 0.5;   // with no kaleidoscope the forms step back too
+  applySignature(p, s.world, d, leading);
+  if (s.raw && !jump) {
+    // A raw passage: the world itself and its echo, nothing folded or laid over it.
+    p.fold = 0; p.mirror = 'none'; p.formContrast = 0; p.tunnel = 0; p.droste = 0;
+    p.warp = Math.min(p.warp, 0.15); p.chromaSplit = Math.min(p.chromaSplit, 0.1);
+  }
   return p;
+}
+
+// Each world's own accent, so four worlds read as four pictures (scaled by Depth, capped like everything else).
+function applySignature(p, world, d, leading) {
+  if (world === 'physarum') {          // mycelium: its veins drawn as contour lines
+    p.contour = clamp01(p.contour + 0.35 * d); p.contourLine = 0.7;
+    if (!leading) p.formKind = 'cobweb';
+  } else if (world === 'swarm') {      // fireflies: long trails that spin and fall inward
+    p.echoDecay = clamp01(p.echoDecay + 0.15); p.echoSpin = clamp01(p.echoSpin + 0.2);
+    p.droste = Math.max(p.droste, 0.25 * d); p.breath = clamp01(p.breath + 0.2);
+  } else if (world === 'boids') {      // the flock: mirrored like water, broad flowing warp
+    if (!leading) p.mirror = 'h';
+    p.warp = clamp01(p.warp + 0.25 * d); p.warpScale = 0.25;
+  } else if (world === 'life') {       // Life: a grid, crisp and slightly split
+    p.formKind = 'lattice'; p.contour = clamp01(p.contour + 0.15 * d);
+    p.chromaSplit = clamp01(p.chromaSplit + 0.1 * d);
+  }
 }
 
 // Depth is the user's dial and a ceiling on everything (§4.1): applied again after moods and gesture overrides.

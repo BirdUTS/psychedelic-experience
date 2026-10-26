@@ -1,5 +1,17 @@
 # Flow with Mind — how to start, what to try, what was tested
 
+## v3.1 (2026-10-26): not one kaleidoscope
+
+Bird after the first v3 look: the mycelium sphere and the fish had disappeared under one constant kaleidoscope. Cause: v3 set the fold to Depth's ceiling whenever the world led (almost always, from the +0.3 baseline), so Depth 0.5 meant 4-fold all the time, with Klüver rings and the flight tunnel on top; the review pass then removed the arc's fold bias, so nothing varied it. Three changes:
+
+- **The arc carries the fold again.** Tidal opens at 0 (the raw sphere), builds to 2, 4, 6; Firefly and Mycelium have their own curves. Depth is only the ceiling (Depth 0.5 = at most 4-fold). With no fold, the form rings step back to half strength.
+- **Raw passages.** The session opens on the world itself for one phrase; after that, three dressed phrases for every raw one; a jump lands on the new world clean for its first phrase. Raw = no fold, no mirror, no form rings, no tunnel, soft warp; the echo and the world stay. The HUD shows `· RAW`; Explain shows the passage count.
+- **World signatures.** Mycelium draws its veins as contour lines (cobweb forms while following); fireflies leave long spinning trails that fall gently inward (echo, droste, breath); the flock is mirrored like water while following, with a broad flowing warp; Life is a lattice grid, crisp and slightly split. All scaled by Depth and capped like everything else.
+
+Tested by machine: 150 tests (arc fold under the Depth cap, raw passages for every world, four distinct signatures bounded and quiet at Depth 0, the passage schedule, the director's arc symmetry without the user floor). Cache `extra-worlds-v10`.
+
+---
+
 ## v3 (2026-10-26): the picture speaks — visual language, computer music, Immerse
 
 Design: `docs/superpowers/specs/2026-10-25-flow-v3-visual-language-design.md`. Plan: `docs/superpowers/plans/2026-10-26-flow-v3.md`. What changed after Bird's ask (computer music without headphones, Immerse where the hand lands, more of the trippy-video vocabulary, a picture that says what the system is doing without words):

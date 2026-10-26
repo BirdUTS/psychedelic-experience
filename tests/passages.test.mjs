@@ -1,0 +1,4 @@
+import {test} from 'node:test'; import assert from 'node:assert/strict';
+import {Passages} from '../immersive/engine/passages.mjs';
+test('the session opens raw for one phrase, then three dressed phrases for every raw one',()=>{const p=new Passages();assert.equal(p.raw,true,'open on the world itself');const seq=[];for(let i=0;i<9;i++){p.update({phrase:true});seq.push(p.raw)}assert.deepEqual(seq,[false,false,false,true,false,false,false,true,false])});
+test('a landing jump makes the next phrase raw and restarts the count; frames between phrases change nothing',()=>{const p=new Passages();p.update({phrase:true});p.update({phrase:true});assert.equal(p.raw,false);p.update({landed:true});assert.equal(p.raw,true,'the new world arrives clean');for(let i=0;i<50;i++)p.update({});assert.equal(p.raw,true);const seq=[];for(let i=0;i<4;i++){p.update({phrase:true});seq.push(p.raw)}assert.deepEqual(seq,[false,false,false,true])});
