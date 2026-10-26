@@ -18,6 +18,7 @@ SCENES = ['physarum', 'swarm', 'boids', 'life']
 PALETTES = ['ink', 'silk', 'ember', 'neon']
 INITIATIVES = ['follow', 'mutual', 'lead']
 REQUESTS = ['none', 'slower', 'faster', 'warmer', 'cooler', 'surround', 'calm_down', 'hold_scene', 'change_scene', 'more_symmetry', 'less_symmetry']
+MOODS = ['clear', 'dream', 'melt', 'electric', 'holy']   # v3: a bias over the visual grammar, committed on the next phrase boundary
 FOLDS = [0, 2, 4, 6, 8]
 
 SCENE_CRITERIA = {
@@ -105,6 +106,15 @@ def validate_state(data):
     }
 
 
+MOOD_CRITERIA = {
+    'clear': 'Clear: crisp contour bands, little warp, no colour fringing — for focused, articulate passages.',
+    'dream': 'Dream: slow breathing, long echoes, a soft warp — for floating, ambient passages.',
+    'melt': 'Melt: strong domain warping and long echoes, everything flows into everything — for thick, saturated passages.',
+    'electric': 'Electric: colour fringing, dense form constants, fast hue cycling — for sharp, high-energy passages.',
+    'holy': 'Holy: eight-fold symmetry, bright gain, tunnel forms — for climactic, awe-struck passages.',
+}
+
+
 def build_questions(state):
     q = {
         'hold': {'type': 'noul', 'instructions': PREFIX + 'Given the recent sound and how long the current scene has run (sceneAge in seconds), should the world HOLD its current state rather than move on?',
@@ -116,6 +126,7 @@ def build_questions(state):
         'symmetry': {'type': 'score', 'instructions': PREFIX + 'Rate how much kaleidoscopic symmetry suits this passage.', 'criteria': SYMMETRY_LEVELS},
         'palette': {'type': 'choice', 'instructions': PREFIX + 'Choose a colour palette for this passage.', 'criteria': PALETTE_CRITERIA},
         'initiative': {'type': 'choice', 'instructions': PREFIX + 'Should the world lead the room, follow it, or stay mutual? High agency (people acting) favours follow; a quiet absorbed room favours lead.', 'criteria': INITIATIVE_CRITERIA},
+        'mood': {'type': 'choice', 'instructions': PREFIX + 'Choose the visual mood for the next passage: a bias over the picture\'s grammar, not a reading of anyone\'s state.', 'criteria': MOOD_CRITERIA},
     }
     if state.get('userText'):
         q['request'] = {'type': 'choice', 'instructions': PREFIX + 'Classify userRequest into one bounded action, or none.', 'criteria': REQUEST_CRITERIA}
@@ -160,7 +171,7 @@ def map_answers(answers, version):
     if 'symmetry' in answers:
         score, conf = _score(answers['symmetry'], 5)
         result['symmetry'] = FOLDS[int(round(score))]; result['confidence']['symmetry'] = conf
-    for key, allowed in (('palette', PALETTES), ('initiative', INITIATIVES), ('request', REQUESTS)):
+    for key, allowed in (('palette', PALETTES), ('initiative', INITIATIVES), ('request', REQUESTS), ('mood', MOODS)):
         if key in answers:
             choice, _, conf = _choice(answers[key], allowed)
             result[key] = choice; result['confidence'][key] = conf
@@ -180,7 +191,7 @@ class Handler(SimpleHTTPRequestHandler):
         super().__init__(*args, directory=str(ROOT), **kwargs)
 
     def log_message(self, fmt, *args):
-        if '/api/' in (args[0] if args else ''):
+        if args and isinstance(args[0], str) and '/api/' in args[0]:   # send_error passes an HTTPStatus first
             super().log_message(fmt, *args)
 
     def do_GET(self):
