@@ -1,7 +1,9 @@
 /* Visual gestures (v3 §4.2): short sentences the world says at moments of change — take, yield, listen,
-   carry, surprise, rebirth, jump. One at a time; rebirth and jump pre-empt. Envelopes rise over the first
+   carry, surprise, rebirth, jump. One at a time; a stronger one may interrupt a weaker one. Envelopes rise over the first
    20 % of their length and fall to zero at the end. Pure. */
 export const GESTURES = ['take', 'yield', 'listen', 'carry', 'surprise', 'rebirth', 'jump'];
+// A stronger sentence may interrupt a weaker one: take / yield (who leads) over surprise over the ambient listen / carry.
+const PRIORITY = { rebirth: 6, jump: 5, take: 4, yield: 4, surprise: 3, listen: 1, carry: 1 };
 const clamp01 = v => v < 0 ? 0 : v > 1 ? 1 : v;
 
 export class VisualGestures {
@@ -24,12 +26,13 @@ export class VisualGestures {
     // Leading time since the last gesture (for carry).
     if (I > 0.2) this.leadFor += dt; else this.leadFor = 0;
     // Pre-empting events, then idle triggers in priority order.
+    const can = name => !this.active || PRIORITY[name] > PRIORITY[this.active];
     if (events.rewind) this.start('rebirth', 2);
-    else if (events.jump) this.start('jump', 4);
+    else if (events.jump && can('jump')) this.start('jump', 4);
+    else if (take && can('take')) this.start('take', 2 * bs);
+    else if (yieldNow && can('yield')) this.start('yield', 2 * bs);
     else if (!this.active) {
-      if (take) this.start('take', 2 * bs);
-      else if (yieldNow) this.start('yield', 2 * bs);
-      else if (I < 0 && A > 0.5) this.start('listen', 4 * bs);
+      if (I < 0 && A > 0.5) this.start('listen', 4 * bs);
       else if (surprise > 0.7 && this.clock - this.lastSurprise >= this.gap) { this.start('surprise', bs); this.lastSurprise = this.clock; }
       else if (this.leadFor + 1e-9 >= 16 * bs) this.start('carry', 4 * bs);
     }

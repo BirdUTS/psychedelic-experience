@@ -1,6 +1,7 @@
 /* Post-process (v3 §4): one fragment pass turns a *program* (engine/grammar.mjs) into the picture.
    On the sampling coordinate: breath → warp → tunnel (log-polar) → fold / mirror → sample (chroma split along the radius).
-   On colour: contour → forms (Klüver stripes in log-polar space) → echo (previous frame; droste) → hue cycle.
+   On colour: contour → echo (previous frame; droste) → hue cycle; then, on the way to the screen only, forms (Klüver
+   stripes in log-polar space) — never into the feedback buffer.
    Appearance layers only; the simulations' rules are untouched. Browser module (imports Three.js).
    The echo mix mirrors engine/feedback-math.mjs exactly: out = 1 - exp(-(cur·gain + prev·min(decay, 0.96))). */
 import * as THREE from '../../vendor/three.module.js';
@@ -85,22 +86,6 @@ void main(){
     float ratio = min(1.5, ((floor(x) + 0.5) / bands) / max(lum, 1e-3));
     col = mix(col, col * ratio * line, contour);
   }
-  // forms: Klüver stripes in log-polar space, screen-blended in the world's own colour
-  if (formContrast > 0.0) {
-    float r = max(length(c), 1e-4), th = ang(c), lr = log(r);
-    float D = 4.0 + 20.0 * formDensity, m = max(1.0, floor(D + 0.5));
-    float ph = formDrift * (1.5 * time + 0.3 * sin(TAU * beatPhase));
-    float s;
-    if (formKind == 0) s = cos(lr * D - ph);                                   // tunnel: rings along log r
-    else if (formKind == 1) s = cos(lr * D + th * m - ph);                     // spiral: 45° in log-polar
-    else if (formKind == 2) s = 0.8 * cos(th * m) + 0.2 * cos(lr * D - ph);    // cobweb: spokes, faint rings
-    else s = cos(lr * D - ph) * cos(th * m);                                   // lattice: both
-    float v = smoothstep(0.15, 0.85, 0.5 + 0.5 * s) * smoothstep(0.0, 0.06, r);
-    float mx = max(col.r, max(col.g, col.b));
-    vec3 tint = mix(vec3(0.4), col / max(mx, 0.05), 0.6);
-    float keep = 0.35 + 0.65 * smoothstep(0.0, 0.5, mx);   // dark space stays mostly dark under the stripes
-    col = 1.0 - (1.0 - col) * (1.0 - v * formContrast * keep * tint);
-  }
   // echo: the previous frame, zoomed and spun; droste pulls it into its own centre along a spiral
   vec2 q = vUv - 0.5;
   vec2 e = rot2(q, uRot) / uZoom + 0.5;
@@ -118,6 +103,36 @@ void main(){
   vec3 outc = 1.0 - exp(-(max(col, 0.0) * uGain + prev * min(uDecay, 0.96)));
   if (chromaCycle > 0.0) outc = hueRotate(outc, chromaCycle * time * 0.3);
   gl_FragColor = vec4(max(outc, 0.0), 1.0);
+}`;
+
+const DISPLAY = `
+precision highp float;
+uniform sampler2D tInput; uniform float aspect; uniform float time; uniform float beatPhase;
+uniform int formKind; uniform float formDensity; uniform float formDrift; uniform float formContrast;
+varying vec2 vUv;
+const float TAU = 6.28318531;
+float ang(vec2 c){ return dot(c, c) > 1e-10 ? atan(c.y, c.x) : 0.0; }
+void main(){
+  vec3 col = texture2D(tInput, vUv).rgb;
+  vec2 c = (vUv - 0.5) * vec2(aspect, 1.0);
+  // forms: Klüver stripes in log-polar space, screen-blended in the picture's own colour. Drawn here, on the way
+  // to the screen, never into the feedback buffer: an additive pattern fed back through the echo washes to white.
+  if (formContrast > 0.0) {
+    float r = max(length(c), 1e-4), th = ang(c), lr = log(r);
+    float D = 4.0 + 20.0 * formDensity, m = max(1.0, floor(D + 0.5));
+    float ph = formDrift * (1.5 * time + 0.3 * sin(TAU * beatPhase));
+    float s;
+    if (formKind == 0) s = cos(lr * D - ph);                                   // tunnel: rings along log r
+    else if (formKind == 1) s = cos(lr * D + th * m - ph);                     // spiral: 45° in log-polar
+    else if (formKind == 2) s = 0.8 * cos(th * m) + 0.2 * cos(lr * D - ph);    // cobweb: spokes, faint rings
+    else s = cos(lr * D - ph) * cos(th * m);                                   // lattice: both
+    float v = smoothstep(0.15, 0.85, 0.5 + 0.5 * s) * smoothstep(0.0, 0.06, r);
+    float mx = max(col.r, max(col.g, col.b));
+    vec3 tint = mix(vec3(0.4), col / max(mx, 0.05), 0.6);
+    float keep = 0.25 + 0.75 * smoothstep(0.0, 0.5, mx);   // dark space stays mostly dark under the stripes
+    col = 1.0 - (1.0 - col) * (1.0 - v * formContrast * keep * tint);
+  }
+  gl_FragColor = vec4(col, 1.0);
 }`;
 
 const DIRECT = ['droste', 'tunnel', 'tunnelSpeed', 'formDensity', 'formDrift', 'formContrast', 'warp', 'warpScale', 'warpRate', 'breath', 'contour', 'contourLine', 'chromaSplit', 'chromaCycle'];
@@ -141,7 +156,8 @@ export class PostFX {
     for (const k of DIRECT) u[k] = { value: 0 };
     this.material = new THREE.ShaderMaterial({ uniforms: u, vertexShader: VERTEX, fragmentShader: FRAGMENT, depthTest: false, depthWrite: false });
     this.quad = new THREE.Scene(); this.quad.add(new THREE.Mesh(new THREE.PlaneGeometry(2, 2), this.material));
-    this.copyMaterial = new THREE.MeshBasicMaterial({ map: this.pong.texture, depthTest: false, depthWrite: false });
+    const d = this.display = { tInput: { value: this.pong.texture }, aspect: { value: w / h }, time: { value: 0 }, beatPhase: { value: 0 }, formKind: { value: 0 }, formDensity: { value: 0 }, formDrift: { value: 0 }, formContrast: { value: 0 } };
+    this.copyMaterial = new THREE.ShaderMaterial({ uniforms: d, vertexShader: VERTEX, fragmentShader: DISPLAY, depthTest: false, depthWrite: false });
     this.blit = new THREE.Scene(); this.blit.add(new THREE.Mesh(new THREE.PlaneGeometry(2, 2), this.copyMaterial));
     this.fold = 0; this.foldPrev = 0; this.foldMix = 1;
     this.program = defaultProgram();   // the last program rendered (for Explain and checks)
@@ -149,7 +165,7 @@ export class PostFX {
   setSize(width, height) {
     const w = Math.max(2, width | 0), h = Math.max(2, height | 0);
     this.sceneTarget.setSize(w, h); this.ping.setSize(w, h); this.pong.setSize(w, h);
-    this.uniforms.aspect.value = w / h; this.uniforms.resolution.value.set(w, h);
+    this.uniforms.aspect.value = w / h; this.uniforms.resolution.value.set(w, h); this.display.aspect.value = w / h;
   }
   render(scene, camera, program = defaultProgram(), { pulse = 0, beatPhase = 0, time = 0, dt = 1 / 60, quality = 1, fadeSeconds = 2 } = {}) {
     const r = this.renderer, u = this.uniforms, p = program;
@@ -174,7 +190,9 @@ export class PostFX {
     r.setRenderTarget(this.sceneTarget); r.clear(); r.render(scene, camera);
     u.tScene.value = this.sceneTarget.texture; u.tPrev.value = this.ping.texture;
     r.setRenderTarget(this.pong); r.render(this.quad, this.camera);
-    this.copyMaterial.map = this.pong.texture;
+    const d = this.display;
+    d.tInput.value = this.pong.texture; d.time.value = time; d.beatPhase.value = beatPhase; d.formKind.value = u.formKind.value;
+    d.formDensity.value = u.formDensity.value; d.formDrift.value = u.formDrift.value; d.formContrast.value = u.formContrast.value;
     r.setRenderTarget(previousTarget); r.render(this.blit, this.camera);
     [this.ping, this.pong] = [this.pong, this.ping];
   }

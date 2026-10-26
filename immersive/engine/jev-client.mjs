@@ -1,6 +1,7 @@
 /* JEV client: bounded state out, schema-checked decision in. Stale, slow or malformed answers are dropped.
    JEV sets targets in a fixed vocabulary; nothing here touches a frame. */
 import { SCENES, PALETTES, FOLDS } from './arcs.mjs';
+import { MOODS } from './grammar.mjs';
 
 export const REQUEST_ACTIONS = ['none', 'slower', 'faster', 'warmer', 'cooler', 'surround', 'calm_down', 'hold_scene', 'change_scene', 'more_symmetry', 'less_symmetry'];
 export const INITIATIVES = ['follow', 'mutual', 'lead'];
@@ -41,6 +42,7 @@ export function validateDecision(raw, { sentVersion, sentAt, now, maxAge = 10, f
     palette: v => PALETTES.includes(v),
     initiative: v => INITIATIVES.includes(v),
     request: v => REQUEST_ACTIONS.includes(v),
+    mood: v => MOODS.includes(v),
   };
   for (const k in checks) {
     if (raw[k] === undefined || raw[k] === null) continue;

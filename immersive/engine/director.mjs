@@ -5,6 +5,7 @@ import { BeatClock, WorldClock, BeatPredictor } from './beat-clock.mjs';
 import { Agency } from './agency.mjs';
 import { Initiative } from './initiative.mjs';
 import { ArcPlayer } from './arcs.mjs';
+import { MOODS } from './grammar.mjs';
 
 const clamp = (v, lo, hi) => v < lo ? lo : v > hi ? hi : v;
 const blend = (cur, target, dt, tau) => cur + (target - cur) * (1 - Math.exp(-dt / tau));
@@ -21,6 +22,7 @@ export class Director {
     this.N = 0.5;                    // novelty budget starts half full: one injection available at once, never two in the first second
     this.eAvg = 0; this.hadMusic = false;
     this.palette = null; this.committedS = null;   // lead palette and fold commit only on phrase boundaries
+    this.mood = null; this.pendingMood = null;      // JEV mood (v3): pending until a phrase boundary; a scene change drops the pending one
     this.lastOut = null;
     this.jevSceneRequest = null; this.pendingRequest = null; this.jevAxes = new Set();
     this.appliedArcIndex = -1; this.appliedArcName = null;
@@ -38,6 +40,7 @@ export class Director {
     this.sceneAge = 0;
     if (this.jevSceneRequest === this.scene) this.jevSceneRequest = null;
     if (this.userSceneRequest === this.scene) this.userSceneRequest = null;
+    this.pendingMood = null;
     this.heat = 0; this.heating = false; this.belowSince = null; this.deepSince = null;   // a new world starts with a clean metabolism
   }
 
@@ -71,6 +74,7 @@ export class Director {
     if (typeof decision.hold === 'number') this.arcs.holdUntilNextWaypoint(decision.hold);
     if (ok('scene') && decision.scene.p >= 0.6 && decision.scene.choice !== this.scene) this.jevSceneRequest = decision.scene.choice;
     if (ok('request') && decision.request !== 'none') this.pendingRequest = decision.request;
+    if (ok('mood') && MOODS.includes(decision.mood)) this.pendingMood = decision.mood;
   }
 
   update(dt, input) {
@@ -149,6 +153,7 @@ export class Director {
     if (leadP && (this.palette === null || (lead.palette !== this.palette && phraseBoundary))) this.palette = lead.palette;
     const S = leadS ? Math.max(user.S, this.committedS) : user.S;   // the user's symmetry is a floor, never ignored
     const palette = this.palette ?? 'ink';
+    if (this.pendingMood && phraseBoundary) { this.mood = this.pendingMood; this.pendingMood = null; }
     const camera = leadCam ? lead.camera : user.camera;
     const hue = ((user.hue + (0.5 - B) * 60) % 360 + 360) % 360;
     const hWidth = 0.15 + 0.25 * C;
@@ -175,7 +180,7 @@ export class Director {
     const src = (axis, leadActive, userTouched) => leadActive ? (this.jevAxes.has(axis) ? 'jev' : 'arc') : (userTouched ? 'you' : 'music');
     return this.lastOut = {
       I, lambda, As, phase: this.beat.phase, worldPhase: this.world.phase, pulse, phraseBoundary, surprise,
-      targets: { H, T, D, S, F, palette, hue, camera, omega: lead.omega },
+      targets: { H, T, D, S, F, palette, hue, camera, omega: lead.omega }, mood: this.mood,
       hTarget, hWidth, sceneChange, injection, request: request1,
       heat: this.heat, rewind, events: { beat, accent, phrase: phraseBoundary },
       liveliness: typeof input.liveliness === 'number' ? input.liveliness : null,
