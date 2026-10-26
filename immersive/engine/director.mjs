@@ -40,7 +40,7 @@ export class Director {
     this.sceneAge = 0;
     if (this.jevSceneRequest === this.scene) this.jevSceneRequest = null;
     if (this.userSceneRequest === this.scene) this.userSceneRequest = null;
-    this.pendingMood = null;
+    this.clearMood();   // a mood was chosen for the passage that just ended
     this.heat = 0; this.heating = false; this.belowSince = null; this.deepSince = null;   // a new world starts with a clean metabolism
   }
 
@@ -59,6 +59,8 @@ export class Director {
     }
     return false;
   }
+
+  clearMood() { this.mood = null; this.pendingMood = null; }
 
   applyDecision(decision) {
     if (!decision || typeof decision !== 'object') return;

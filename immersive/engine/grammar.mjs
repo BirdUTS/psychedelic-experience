@@ -30,7 +30,7 @@ export function programFor(state, depth, into = defaultProgram()) {
   const L = clamp01(s.L ?? 1), heat = clamp01(s.heat ?? 0), calm = !!s.calm, jump = !!s.jump, diving = !!s.diving, hover = s.ship === 'hover';
   const lead = (I + 1) / 2, leading = lead > 0.5, foldCap = FOLDS[Math.round(d * 4)];
   p.formKind = jump ? 'lattice' : leading ? (C > 0.5 ? 'spiral' : 'tunnel') : (A > 0.3 ? 'cobweb' : 'lattice');
-  p.formDrift = jump ? 1 : clamp(leading ? (0.3 + 0.7 * C) * (diving ? 2.5 : 1) : -(0.2 + 0.3 * (1 - C)), -1, 1);
+  p.formDrift = jump ? 1 : clamp(leading ? (0.3 + 0.7 * C) * (diving ? 2.5 : 1) : -(0.2 + 0.3 * C), -1, 1);   // low coherence drifts slowly either way
   p.formDensity = clamp01((0.3 + 0.6 * E) * d * (1 - 0.5 * A));
   p.formContrast = Math.min(0.6, 0.6 * d);
   p.fold = leading ? foldCap : 0;
@@ -47,6 +47,23 @@ export function programFor(state, depth, into = defaultProgram()) {
   p.tunnel = jump ? 1 : hover ? 0 : diving ? 0.7 : 0.3;
   p.tunnelSpeed = jump ? 1 : diving ? 1 : 0.4;
   p.gain = calm ? Math.min(0.5, 0.3 + 0.7 * d) : clamp01(0.3 + 0.7 * d);
+  return p;
+}
+
+// Depth is the user's dial and a ceiling on everything (§4.1): applied again after moods and gesture overrides.
+export function capProgram(p, depth) {
+  const d = clamp01(Number.isFinite(depth) ? depth : 0.5), foldCap = FOLDS[Math.round(d * 4)];
+  let f = Number(p.fold) || 0;
+  if (!FOLDS.includes(f)) f = FOLDS.filter(x => x <= f).pop() ?? 0;
+  p.fold = Math.min(f, foldCap);
+  if (!MIRRORS.includes(p.mirror)) p.mirror = 'none';
+  if (!FORM_KINDS.includes(p.formKind)) p.formKind = 'tunnel';
+  for (const k of CONTINUOUS) p[k] = clamp(p[k], k === 'formDrift' ? -1 : 0, 1);
+  p.warp = Math.min(p.warp, Math.max(d, 0.1));
+  p.formDensity = Math.min(p.formDensity, d);
+  p.formContrast = Math.min(p.formContrast, 0.6 * d);
+  p.chromaSplit = Math.min(p.chromaSplit, 0.6 * d);
+  p.gain = Math.min(p.gain, 0.3 + 0.7 * d);
   return p;
 }
 

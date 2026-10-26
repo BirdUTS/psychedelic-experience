@@ -1,0 +1,5 @@
+import {test} from 'node:test'; import assert from 'node:assert/strict';
+import {Phases, RATES} from '../immersive/engine/phases.mjs';
+const dt=1/60, P=(o={})=>({warpRate:.3,tunnelSpeed:.4,formDrift:.3,chromaCycle:.2,...o});
+test('phases integrate per frame: a rate change changes the velocity, never the phase, however long the session has run',()=>{const ph=new Phases();for(let k=0;k<3600*60;k++)ph.advance(dt,P());const before={...ph.value()};ph.advance(dt,P({warpRate:1,tunnelSpeed:1,formDrift:1,chromaCycle:1}));const after=ph.value();for(const k of ['warp','tunnel','form','hue'])assert(Math.abs(after[k]-before[k])<=RATES[k]*dt+1e-9,`${k} jumped by ${after[k]-before[k]}`);assert(after.warp>before.warp&&after.hue>before.hue)});
+test('negative drift runs the form phase backwards; a zero rate holds; paused frames do not advance',()=>{const ph=new Phases();ph.advance(1,P({formDrift:-1}));assert(ph.value().form<0);const t=ph.value().tunnel;ph.advance(1,P({tunnelSpeed:0}));assert.equal(ph.value().tunnel,t);const v={...ph.value()};ph.advance(0,P());assert.deepEqual(ph.value(),v)});

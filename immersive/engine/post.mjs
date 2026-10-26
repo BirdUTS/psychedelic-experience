@@ -1,7 +1,8 @@
 /* Post-process (v3 §4): one fragment pass turns a *program* (engine/grammar.mjs) into the picture.
    On the sampling coordinate: breath → warp → tunnel (log-polar) → fold / mirror → sample (chroma split along the radius).
-   On colour: contour → echo (previous frame; droste) → hue cycle; then, on the way to the screen only, forms (Klüver
-   stripes in log-polar space) — never into the feedback buffer.
+   On colour: contour → echo (previous frame; droste); then, on the way to the screen only, the hue cycle and the forms
+   (Klüver stripes in log-polar space) — never into the feedback buffer, where an absolute hue angle would compound
+   per frame. Every moving phase is integrated by engine/phases.mjs and passed in, never rate × time.
    Appearance layers only; the simulations' rules are untouched. Browser module (imports Three.js).
    The echo mix mirrors engine/feedback-math.mjs exactly: out = 1 - exp(-(cur·gain + prev·min(decay, 0.96))). */
 import * as THREE from '../../vendor/three.module.js';
@@ -12,12 +13,12 @@ const FRAGMENT = `
 precision highp float;
 uniform sampler2D tScene; uniform sampler2D tPrev;
 uniform vec2 resolution; uniform float aspect; uniform float pixelRatio;
-uniform float time; uniform float beatPhase; uniform float pulse; uniform float quality;
+uniform float warpPhase; uniform float tunnelScroll; uniform float beatPhase; uniform float pulse; uniform float quality;
 uniform float fold; uniform float foldPrev; uniform float foldMix; uniform int mirror; uniform int formKind;
 uniform float droste; uniform float tunnel; uniform float tunnelSpeed;
 uniform float formDensity; uniform float formDrift; uniform float formContrast;
 uniform float warp; uniform float warpScale; uniform float warpRate; uniform float breath;
-uniform float contour; uniform float contourLine; uniform float chromaSplit; uniform float chromaCycle;
+uniform float contour; uniform float contourLine; uniform float chromaSplit;
 uniform float uZoom; uniform float uRot; uniform float uDecay; uniform float uGain;
 varying vec2 vUv;
 const float PI = 3.14159265; const float TAU = 6.28318531;
@@ -49,11 +50,6 @@ vec3 sampleScene(vec2 uv, vec2 off){
   if (foldMix >= 1.0) return a;
   return mix(split(mirrorUv(foldUv(uv, foldPrev)), off), a, foldMix);
 }
-vec3 hueRotate(vec3 c, float a){
-  const vec3 k = vec3(0.57735027);
-  float cs = cos(a), sn = sin(a);
-  return c * cs + cross(k, c) * sn + k * dot(k, c) * (1.0 - cs);
-}
 void main(){
   vec2 c = (vUv - 0.5) * vec2(aspect, 1.0);
   // breath: a barrel factor locked to the world clock (the frame inhales and exhales)
@@ -62,14 +58,14 @@ void main(){
   // warp: iterated sine domain warping (melting)
   vec2 p = c;
   if (warp > 0.0) {
-    float k = 2.0 + 10.0 * warpScale, t = time * (0.3 + 2.0 * warpRate), amp = 0.04 * warp;
+    float k = 2.0 + 10.0 * warpScale, t = warpPhase, amp = 0.04 * warp;
     for (int i = 0; i < 6; i++) { if (float(i) >= 6.0 * quality) break; p += amp * sin(p.yx * k + t + float(i) * 1.7); }
   }
   // tunnel: the frame becomes a tube (log-polar remap), mixed by amount; speed scrolls down it
   vec2 uv = p / vec2(aspect, 1.0) + 0.5;
   if (tunnel > 0.0) {
     float r = max(length(p), 1e-4), th = ang(p);
-    vec2 tuv = vec2(tri(th / PI + 1.0), tri(log(r) * 1.2 - tunnelSpeed * time * 1.2));
+    vec2 tuv = vec2(tri(th / PI + 1.0), tri(log(r) * 1.2 - tunnelScroll));
     uv = mix(uv, tuv, tunnel);
   }
   // sample the world through fold and mirror, with the chroma split along the radius
@@ -101,26 +97,31 @@ void main(){
   // in the feedback buffer would spread through every later frame (NaN compares false, so the guard resets it).
   prev = max(prev, 0.0); if (!(prev.r + prev.g + prev.b >= 0.0)) prev = vec3(0.0);
   vec3 outc = 1.0 - exp(-(max(col, 0.0) * uGain + prev * min(uDecay, 0.96)));
-  if (chromaCycle > 0.0) outc = hueRotate(outc, chromaCycle * time * 0.3);
   gl_FragColor = vec4(max(outc, 0.0), 1.0);
 }`;
 
 const DISPLAY = `
 precision highp float;
-uniform sampler2D tInput; uniform float aspect; uniform float time; uniform float beatPhase;
+uniform sampler2D tInput; uniform float aspect; uniform float beatPhase; uniform float formPhase; uniform float hueAngle;
 uniform int formKind; uniform float formDensity; uniform float formDrift; uniform float formContrast;
 varying vec2 vUv;
 const float TAU = 6.28318531;
 float ang(vec2 c){ return dot(c, c) > 1e-10 ? atan(c.y, c.x) : 0.0; }
+vec3 hueRotate(vec3 c, float a){
+  const vec3 k = vec3(0.57735027);
+  float cs = cos(a), sn = sin(a);
+  return c * cs + cross(k, c) * sn + k * dot(k, c) * (1.0 - cs);
+}
 void main(){
   vec3 col = texture2D(tInput, vUv).rgb;
+  if (hueAngle != 0.0) col = max(hueRotate(col, hueAngle), 0.0);   // the slow hue cycle, on the display only
   vec2 c = (vUv - 0.5) * vec2(aspect, 1.0);
   // forms: Klüver stripes in log-polar space, screen-blended in the picture's own colour. Drawn here, on the way
   // to the screen, never into the feedback buffer: an additive pattern fed back through the echo washes to white.
   if (formContrast > 0.0) {
     float r = max(length(c), 1e-4), th = ang(c), lr = log(r);
     float D = 4.0 + 20.0 * formDensity, m = max(1.0, floor(D + 0.5));
-    float ph = formDrift * (1.5 * time + 0.3 * sin(TAU * beatPhase));
+    float ph = formPhase + formDrift * 0.3 * sin(TAU * beatPhase);
     float s;
     if (formKind == 0) s = cos(lr * D - ph);                                   // tunnel: rings along log r
     else if (formKind == 1) s = cos(lr * D + th * m - ph);                     // spiral: 45° in log-polar
@@ -135,7 +136,7 @@ void main(){
   gl_FragColor = vec4(col, 1.0);
 }`;
 
-const DIRECT = ['droste', 'tunnel', 'tunnelSpeed', 'formDensity', 'formDrift', 'formContrast', 'warp', 'warpScale', 'warpRate', 'breath', 'contour', 'contourLine', 'chromaSplit', 'chromaCycle'];
+const DIRECT = ['droste', 'tunnel', 'tunnelSpeed', 'formDensity', 'formDrift', 'formContrast', 'warp', 'warpScale', 'warpRate', 'breath', 'contour', 'contourLine', 'chromaSplit'];
 const clamp = (v, lo, hi) => (v = Number(v) || 0) < lo ? lo : v > hi ? hi : v;
 
 export class PostFX {
@@ -149,14 +150,14 @@ export class PostFX {
     const u = this.uniforms = {
       tScene: { value: this.sceneTarget.texture }, tPrev: { value: this.ping.texture },
       resolution: { value: new THREE.Vector2(w, h) }, aspect: { value: w / h }, pixelRatio: { value: 1 },
-      time: { value: 0 }, beatPhase: { value: 0 }, pulse: { value: 0 }, quality: { value: 1 },
+      warpPhase: { value: 0 }, tunnelScroll: { value: 0 }, beatPhase: { value: 0 }, pulse: { value: 0 }, quality: { value: 1 },
       fold: { value: 0 }, foldPrev: { value: 0 }, foldMix: { value: 1 }, mirror: { value: 0 }, formKind: { value: 0 },
       uZoom: { value: 1 }, uRot: { value: 0 }, uDecay: { value: 0.8 }, uGain: { value: 1.25 },
     };
     for (const k of DIRECT) u[k] = { value: 0 };
     this.material = new THREE.ShaderMaterial({ uniforms: u, vertexShader: VERTEX, fragmentShader: FRAGMENT, depthTest: false, depthWrite: false });
     this.quad = new THREE.Scene(); this.quad.add(new THREE.Mesh(new THREE.PlaneGeometry(2, 2), this.material));
-    const d = this.display = { tInput: { value: this.pong.texture }, aspect: { value: w / h }, time: { value: 0 }, beatPhase: { value: 0 }, formKind: { value: 0 }, formDensity: { value: 0 }, formDrift: { value: 0 }, formContrast: { value: 0 } };
+    const d = this.display = { tInput: { value: this.pong.texture }, aspect: { value: w / h }, beatPhase: { value: 0 }, formPhase: { value: 0 }, hueAngle: { value: 0 }, formKind: { value: 0 }, formDensity: { value: 0 }, formDrift: { value: 0 }, formContrast: { value: 0 } };
     this.copyMaterial = new THREE.ShaderMaterial({ uniforms: d, vertexShader: VERTEX, fragmentShader: DISPLAY, depthTest: false, depthWrite: false });
     this.blit = new THREE.Scene(); this.blit.add(new THREE.Mesh(new THREE.PlaneGeometry(2, 2), this.copyMaterial));
     this.fold = 0; this.foldPrev = 0; this.foldMix = 1;
@@ -167,7 +168,7 @@ export class PostFX {
     this.sceneTarget.setSize(w, h); this.ping.setSize(w, h); this.pong.setSize(w, h);
     this.uniforms.aspect.value = w / h; this.uniforms.resolution.value.set(w, h); this.display.aspect.value = w / h;
   }
-  render(scene, camera, program = defaultProgram(), { pulse = 0, beatPhase = 0, time = 0, dt = 1 / 60, quality = 1, fadeSeconds = 2 } = {}) {
+  render(scene, camera, program = defaultProgram(), { pulse = 0, beatPhase = 0, phases = null, dt = 1 / 60, quality = 1, fadeSeconds = 2 } = {}) {
     const r = this.renderer, u = this.uniforms, p = program;
     const fold = Number(p.fold) || 0;
     if (fold !== this.fold) {
@@ -184,14 +185,15 @@ export class PostFX {
     u.uRot.value = 0.004 * clamp(p.echoSpin, 0, 1);
     u.uDecay.value = 0.80 + 0.16 * clamp(p.echoDecay, 0, 1);
     u.uGain.value = 0.5 + 1.25 * clamp(p.gain, 0, 1);
-    u.time.value = time; u.beatPhase.value = beatPhase; u.pulse.value = pulse; u.quality.value = clamp(quality, 0, 1);
+    u.warpPhase.value = phases ? phases.warp : 0; u.tunnelScroll.value = phases ? phases.tunnel : 0;
+    u.beatPhase.value = beatPhase; u.pulse.value = pulse; u.quality.value = clamp(quality, 0, 1);
     u.pixelRatio.value = r.getPixelRatio();
     const previousTarget = r.getRenderTarget();
     r.setRenderTarget(this.sceneTarget); r.clear(); r.render(scene, camera);
     u.tScene.value = this.sceneTarget.texture; u.tPrev.value = this.ping.texture;
     r.setRenderTarget(this.pong); r.render(this.quad, this.camera);
     const d = this.display;
-    d.tInput.value = this.pong.texture; d.time.value = time; d.beatPhase.value = beatPhase; d.formKind.value = u.formKind.value;
+    d.tInput.value = this.pong.texture; d.beatPhase.value = beatPhase; d.formPhase.value = phases ? phases.form : 0; d.hueAngle.value = phases ? phases.hue : 0; d.formKind.value = u.formKind.value;
     d.formDensity.value = u.formDensity.value; d.formDrift.value = u.formDrift.value; d.formContrast.value = u.formContrast.value;
     r.setRenderTarget(previousTarget); r.render(this.blit, this.camera);
     [this.ping, this.pong] = [this.pong, this.ping];

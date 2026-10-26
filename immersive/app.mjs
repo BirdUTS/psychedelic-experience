@@ -12,7 +12,8 @@ import { SCENES, FOLDS } from './engine/arcs.mjs';
 import { AudioGraph } from './audio.mjs';
 import { Playlist } from './engine/playlist.mjs';
 import { PostFX } from './engine/post.mjs';
-import { defaultProgram, programFor, applyMood, CONTINUOUS, DISCRETE } from './engine/grammar.mjs';
+import { defaultProgram, programFor, applyMood, capProgram, CONTINUOUS, DISCRETE } from './engine/grammar.mjs';
+import { Phases } from './engine/phases.mjs';
 import { VisualGestures } from './engine/visual-gestures.mjs';
 import { JevClient, buildState } from './engine/jev-client.mjs';
 import { directorInput } from './engine/streams.mjs';
@@ -45,7 +46,7 @@ const clock = new THREE.Clock();
 const drawSize = renderer.getDrawingBufferSize(new THREE.Vector2());
 const post = new PostFX(renderer, { width: drawSize.x, height: drawSize.y });
 const program = defaultProgram(), target = defaultProgram(), current = defaultProgram();   // rendered / grammar target / time-blended
-const visualGestures = new VisualGestures();
+const visualGestures = new VisualGestures(), phases = new Phases();
 
 // ---------- engine ----------
 const sims = { physarum: new Physarum(), swarm: new Swarmalators(), boids: new Boids(), life: new Life(64, 1) };
@@ -73,9 +74,9 @@ let dissolving = null, jump = null, snapshotTimer = 0, rewindNote = '', fps = 60
 const summary = { E30: 0, E5: 0, C30: 0, B30: 0, A30: 0 }, recentDecisions = [];
 let lastJevAsk = -Infinity;
 const timing = { step: 0, steps: 0, render: 0, post: 0, dt: 0 };
-let calm = false, quality = 1, lowFpsFor = 0, highFpsFor = 0, programStarted = false, lastGestureEnd = -Infinity, prevGesture = null, rewindFired = false, jumpFired = false, lastJump = false;
+let calm = false, quality = 1, lowFpsFor = 0, highFpsFor = 0, programStarted = false, lastGestureEnd = -Infinity, prevGesture = null, rewindFired = false, jumpFired = false, lastJump = false, depthTouched = false, leavingByGlyph = false;
 window.__flow = {
-  director, audio, sims, worlds, ship, liveliness, rings, timing, jev, gestures, post, program, target, current, visualGestures,
+  director, audio, sims, worlds, ship, liveliness, rings, timing, jev, gestures, post, program, target, current, visualGestures, phases,
   forceProgram: null,   // a partial program merged over the computed one (checks)
   get calm() { return calm; }, set calm(v) { calm = !!v; $('calm').checked = calm; }, get quality() { return quality; }, immerse,
   get musicF() { return musicF; }, get roomF() { return roomF; }, get depth() { return depth; }, set depth(v) { setDepth(v); },
@@ -139,7 +140,7 @@ function setShipMode(mode) {
   touch();
 }
 function setDepth(v) {
-  depth = Math.max(0, Math.min(1, Number.isFinite(v) ? v : depth)); $('depth').value = depth.toFixed(2);
+  depth = Math.max(0, Math.min(1, Number.isFinite(v) ? v : depth)); $('depth').value = depth.toFixed(2); depthTouched = true;   // the user's hand: discrete parameters follow at once
   const hint = $('depthHint'); hint.classList.add('show'); hint.querySelector('i').style.bottom = (depth * 100) + '%';
   clearTimeout(setDepth.timer); setDepth.timer = setTimeout(() => hint.classList.remove('show'), 1500);
   bump();
@@ -283,15 +284,21 @@ setPause(paused); $('pause').onclick = () => setPause(!paused);
 async function immerse(on) {
   const b = $('immerse');
   if (!b.classList.contains('used')) { b.classList.add('used'); document.body.classList.add('immerseUsed'); b.textContent = '▣'; b.setAttribute('aria-label', 'Immerse'); }
-  document.body.classList.toggle('immersed', on);
+  document.body.classList.toggle('immersed', on); b.setAttribute('aria-pressed', String(on));
   try {
     if (on && !document.fullscreenElement) await document.documentElement.requestFullscreen({ navigationUI: 'hide' });
-    else if (!on && document.fullscreenElement) await document.exitFullscreen();
+    else if (!on && document.fullscreenElement) { leavingByGlyph = true; await document.exitFullscreen(); }
   } catch { /* fullscreen refused (embedded page, policy): titles still hide, the glyph still toggles */ }
   touch();
 }
 $('immerse').onclick = () => immerse(!document.body.classList.contains('immersed'));
-document.addEventListener('fullscreenchange', () => { if (!document.fullscreenElement) document.body.classList.remove('immersed'); });
+document.addEventListener('fullscreenchange', () => {
+  if (document.fullscreenElement) return;
+  // Browser Esc (not the glyph) leaves fullscreen: titles come back and the drawer opens (spec §6).
+  const byEsc = document.body.classList.contains('immersed') && !leavingByGlyph;
+  document.body.classList.remove('immersed'); $('immerse').setAttribute('aria-pressed', 'false'); leavingByGlyph = false;
+  if (byEsc) toggleDrawer(true);
+});
 $('calm').onchange = () => { calm = $('calm').checked; bump(); touch(); };
 $('explainToggle').onclick = () => { const on = $('explain').hidden; $('explain').hidden = !on; $('explainToggle').setAttribute('aria-pressed', String(on)); };
 addEventListener('resize', () => { camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); renderer.setSize(innerWidth, innerHeight); renderer.getDrawingBufferSize(drawSize); post.setSize(drawSize.x, drawSize.y); });
@@ -407,7 +414,7 @@ async function askJev(text = '', force = false) {
   recentDecisions.push(line.slice(0, 120)); while (recentDecisions.length > 3) recentDecisions.shift();
   $('decision').textContent = line;
 }
-$('jev').onclick = () => { jev.enabled = !jev.enabled; jev.bump(); $('jev').textContent = 'JEV: ' + (jev.enabled ? 'on' : 'off'); $('jev').setAttribute('aria-pressed', String(jev.enabled)); if (jev.enabled) askJev('', true); else $('decision').textContent = 'Local director running.'; };
+$('jev').onclick = () => { jev.enabled = !jev.enabled; jev.bump(); if (!jev.enabled) director.clearMood(); $('jev').textContent = 'JEV: ' + (jev.enabled ? 'on' : 'off'); $('jev').setAttribute('aria-pressed', String(jev.enabled)); if (jev.enabled) askJev('', true); else $('decision').textContent = 'Local director running.'; };
 function decide(text = '') {
   if (text && localCommand(text)) { $('decision').textContent = 'Applied locally: ' + text; return; }
   if (!text) { $('decision').textContent = 'Local director running.'; return; }
@@ -517,24 +524,24 @@ function frame(dt) {
     // v3: the director's state becomes a program (grammar), blended over time; gestures speak on top of it.
     const beatSeconds = 60 / Math.max(60, out.hud.bpm);
     programFor({ I: out.I, A: out.As, E: out.hud.E, C: out.hud.C, H: out.targets.H, L, heat: out.heat, ship: ship.mode, diving: ship.diving, jump: !!jump, calm }, depth, target);
-    // The arc's S / F axes bias the program: one fold step toward the arc's symmetry (under Depth's cap), ±0.2 echo decay around the arcs' neutral 0.3.
-    if (target.fold > 0 && out.targets.S !== target.fold) {
-      const i = FOLDS.indexOf(target.fold), cap = FOLDS[Math.round(depth * 4)];
-      target.fold = Math.min(cap, FOLDS[Math.max(0, Math.min(FOLDS.length - 1, i + (out.targets.S > target.fold ? 1 : -1)))]);
-    }
+    // The arc's F axis biases the echo decay by ±0.2 around the arcs' neutral 0.3. (Its S axis has no room: Depth is
+    // both the fold's floor (v2) and its ceiling (v3), so the fold is Depth's whenever the world leads.)
     target.echoDecay = Math.max(0, Math.min(1, target.echoDecay + 0.2 * Math.max(-1, Math.min(1, (out.targets.F - 0.3) / 0.7))));
     if (out.mood) applyMood(target, out.mood, 0.6);
-    const g = paused ? visualGestures : visualGestures.update(dt, { I: out.I, A: out.As, surprise: out.surprise, beatSeconds }, { onset: musicF ? musicF.onset : 0, rewind: rewindFired, jump: jumpFired });
-    rewindFired = false; jumpFired = false;
+    capProgram(target, depth);
+    // Gestures listen to *your* onsets (the room), never the music's (spec §4.2).
+    const roomOnset = frames.room ? roomF.onset : frames.source === 'mic' ? musicF.onset : 0;
+    const g = paused ? visualGestures : visualGestures.update(dt, { I: out.I, A: out.As, surprise: out.surprise, beatSeconds }, { onset: roomOnset, rewind: rewindFired, jump: jumpFired });
+    if (!paused) { rewindFired = false; jumpFired = false; }   // one-shot flags wait for a frame that can deliver them
     if (prevGesture && !g.active) lastGestureEnd = now;
     prevGesture = g.active;
     // Continuous parameters approach the target over ~2 s; discrete ones step on phrase boundaries, when a gesture
     // overrides them, and when a jump starts or lands.
-    const kb = !programStarted ? 1 : jump ? 1 - Math.exp(-dt / 0.3) : 1 - Math.exp(-dt / 2);   // hyperspace arrives fast; everything else over ~2 s
+    const kb = !programStarted ? 1 : paused ? 0 : jump ? 1 - Math.exp(-dt / 0.3) : 1 - Math.exp(-dt / 2);   // hyperspace arrives fast; everything else over ~2 s; paused holds
     for (const k of CONTINUOUS) current[k] += (target[k] - current[k]) * kb;
     const discreteOverride = !!g.active && DISCRETE.some(k => k in g.overrides);
-    if (!programStarted || out.phraseBoundary || discreteOverride || !!jump !== lastJump) for (const k of DISCRETE) current[k] = target[k];
-    programStarted = true; lastJump = !!jump;
+    if (!programStarted || out.phraseBoundary || discreteOverride || !!jump !== lastJump || depthTouched) for (const k of DISCRETE) current[k] = target[k];
+    programStarted = true; lastJump = !!jump; depthTouched = false;
     Object.assign(program, current);
     for (const k in g.overrides) {
       const v = g.overrides[k];
@@ -542,15 +549,17 @@ function frame(dt) {
       else if (typeof v !== 'number' || DISCRETE.includes(k)) program[k] = v;
       else program[k] = Math.max(k === 'formDrift' ? -1 : 0, Math.min(1, current[k] + v));
     }
-    if (calm) { program.chromaSplit = 0; program.gain = Math.min(program.gain, 0.5); }   // calm holds even against gestures and moods
     Object.assign(program, window.__flow.forceProgram);
+    capProgram(program, depth);   // Depth caps gestures too
+    if (calm) { program.chromaSplit = 0; program.chromaCycle = 0; program.gain = Math.min(program.gain, 0.5); }   // calm holds against gestures, moods and the debug hook
+    if (!paused) phases.advance(dt, program);   // a paused picture holds still
     // Quality drops to half after two seconds under 50 fps and returns after five good seconds.
     if (fps < 50) { lowFpsFor += dt; highFpsFor = 0; } else { lowFpsFor = 0; if (fps > 57) highFpsFor += dt; }
     if (lowFpsFor > 2 && quality > 0.5) { quality = 0.5; lowFpsFor = 0; } else if (highFpsFor > 5 && quality < 1) { quality = 1; highFpsFor = 0; }
     // Fold cross-fades: one beat around a gesture, 1 s for jumps and dives, otherwise a phrase (16 beats, at most 8 s).
     const fadeSeconds = g.active || now - lastGestureEnd < 2 * beatSeconds ? Math.min(1, beatSeconds) : jump || ship.diving ? 1 : Math.min(8, 16 * beatSeconds);
     const tPost = performance.now();
-    post.render(scene, camera, program, { pulse: out.pulse, beatPhase: out.phase, time: simClock, dt, quality, fadeSeconds });
+    post.render(scene, camera, program, { pulse: out.pulse, beatPhase: out.phase, phases: phases.wrapped(), dt, quality, fadeSeconds });
     timing.post = performance.now() - tPost;
   }
   if (now - lastHUD > 0.15) { lastHUD = now; updateHUD(out, frames, L); }
@@ -578,7 +587,7 @@ function updateExplain(out, L) {
   const life = world === 'life' ? `<p>Life: ${sims.life.pure ? 'pure B3/S23, no perturbation' : `creative variant · ${sims.life.perturbations} random births so far`}</p>` : '';
   $('explain').innerHTML = `<h3>WHO IS STEERING</h3><dl>
 <dt>H entropy</dt>${cls(src.H)}<dt>T tempo</dt>${cls(src.T)}<dt>D density</dt>${cls(src.D)}<dt>S fold</dt>${cls(src.S)}<dt>F feedback</dt>${cls(src.F)}<dt>P palette</dt>${cls(src.P)}</dl>
-<p>Initiative ${out.I.toFixed(2)} (${autoInitiative ? 'auto, baseline ' + director.initiative.I0.toFixed(1) : 'locked'}) · agency ${out.As.toFixed(2)}<br>Arc ${out.hud.arc} · waypoint ${out.hud.waypoint + 1}${director.arcs.pinned ? ' · pinned' : ''}<br>Entropy target ${out.hTarget.toFixed(2)} ± ${out.hWidth.toFixed(2)} → ${out.targets.H.toFixed(2)} · heat +${out.heat.toFixed(2)}<br>Liveliness ${L.toFixed(2)} (ref ${liveliness.reference(world).toFixed(3)}) · snapshots ${rings[world].count} · ${rewindNote || 'no rewind yet'}<br>Ship ${ship.mode} · ${ship.speed.toFixed(1)} u/s · ${ship.diving ? 'DIVING' : 'level'} · yaw ${ship.yaw.toFixed(0)}° pitch ${ship.pitch.toFixed(0)}° roll ${ship.roll.toFixed(0)}°${jump ? ' · jump ' + jump.t.toFixed(1) + ' s' : ''}<br>Depth ${depth.toFixed(2)} → fold ${axes.fold} · feedback ${axes.feedback.toFixed(2)} · sat ×${axes.saturation.toFixed(2)} · speed ×${axes.speed.toFixed(2)}<br>Beat ${Math.round(out.hud.bpm)} BPM · coherence ${out.hud.C.toFixed(2)} · world phase ${out.I >= 0 ? 'ahead' : 'behind'} by ${Math.round(Math.abs(out.I) * 0.12 * 60000 / Math.max(60, out.hud.bpm))} ms<br>Novelty budget ${director.N.toFixed(2)}<br>Program: forms ${program.formKind} ${program.formDrift >= 0 ? 'in' : 'out'} ${Math.abs(program.formDrift).toFixed(2)} · fold ${program.fold} · mirror ${program.mirror} · warp ${program.warp.toFixed(2)} · tunnel ${program.tunnel.toFixed(2)} · echo ${program.echoDecay.toFixed(2)} · droste ${program.droste.toFixed(2)} · contour ${program.contour.toFixed(2)} · chroma ${program.chromaSplit.toFixed(2)} · quality ${quality}<br>Gesture ${visualGestures.active ? `${visualGestures.active} (${visualGestures.env.toFixed(2)})` : 'none'} · mood ${out.mood ? out.mood + ' (jev)' : 'none'} · arc S ${out.targets.S} F ${out.targets.F.toFixed(2)} → fold ±1 step, echo ±0.2${calm ? ' · CALM' : ''}</p>
+<p>Initiative ${out.I.toFixed(2)} (${autoInitiative ? 'auto, baseline ' + director.initiative.I0.toFixed(1) : 'locked'}) · agency ${out.As.toFixed(2)}<br>Arc ${out.hud.arc} · waypoint ${out.hud.waypoint + 1}${director.arcs.pinned ? ' · pinned' : ''}<br>Entropy target ${out.hTarget.toFixed(2)} ± ${out.hWidth.toFixed(2)} → ${out.targets.H.toFixed(2)} · heat +${out.heat.toFixed(2)}<br>Liveliness ${L.toFixed(2)} (ref ${liveliness.reference(world).toFixed(3)}) · snapshots ${rings[world].count} · ${rewindNote || 'no rewind yet'}<br>Ship ${ship.mode} · ${ship.speed.toFixed(1)} u/s · ${ship.diving ? 'DIVING' : 'level'} · yaw ${ship.yaw.toFixed(0)}° pitch ${ship.pitch.toFixed(0)}° roll ${ship.roll.toFixed(0)}°${jump ? ' · jump ' + jump.t.toFixed(1) + ' s' : ''}<br>Depth ${depth.toFixed(2)} → fold ${axes.fold} · feedback ${axes.feedback.toFixed(2)} · sat ×${axes.saturation.toFixed(2)} · speed ×${axes.speed.toFixed(2)}<br>Beat ${Math.round(out.hud.bpm)} BPM · coherence ${out.hud.C.toFixed(2)} · world phase ${out.I >= 0 ? 'ahead' : 'behind'} by ${Math.round(Math.abs(out.I) * 0.12 * 60000 / Math.max(60, out.hud.bpm))} ms<br>Novelty budget ${director.N.toFixed(2)}<br>Program: forms ${program.formKind} ${program.formDrift >= 0 ? 'in' : 'out'} ${Math.abs(program.formDrift).toFixed(2)} · fold ${program.fold} · mirror ${program.mirror} · warp ${program.warp.toFixed(2)} · tunnel ${program.tunnel.toFixed(2)} · echo ${program.echoDecay.toFixed(2)} · droste ${program.droste.toFixed(2)} · contour ${program.contour.toFixed(2)} · chroma ${program.chromaSplit.toFixed(2)} · quality ${quality}<br>Gesture ${visualGestures.active ? `${visualGestures.active} (${visualGestures.env.toFixed(2)})` : 'none'} · mood ${out.mood ? out.mood + ' (jev)' : 'none'} · arc F ${out.targets.F.toFixed(2)} → echo ±0.2 (fold is Depth's: cap ${FOLDS[Math.round(depth * 4)]})${calm ? ' · CALM' : ''}</p>
 <p>${WORLDS[world][3]}</p>${life}`;
 }
 

@@ -10,7 +10,7 @@ export class AudioGraph {
     this.context = null;
     this.playerSource = null; this.playerAnalyser = null;
     this.micStream = null; this.micSource = null; this.micAnalyser = null; this.micOn = false;
-    this.systemStream = null; this.systemSource = null; this.systemAnalyser = null; this.systemOn = false; this.onSystemEnded = null;
+    this.systemStream = null; this.systemSource = null; this.systemAnalyser = null; this.systemOn = false; this.systemSurface = 'system'; this.onSystemEnded = null;
     this.synthetic = false;
     this.musicBins = new Uint8Array(FFT / 2); this.roomBins = new Uint8Array(FFT / 2); this.synthBins = new Uint8Array(FFT / 2);
   }
@@ -59,18 +59,20 @@ export class AudioGraph {
   async startSystem() {
     if (!navigator.mediaDevices || !navigator.mediaDevices.getDisplayMedia) return { ok: false, reason: 'unsupported' };
     let stream;
-    try {
-      this.ensureContext(); await this.resume();
+    try {   // the picker first, while the click's activation is fresh; the context resumes afterwards
       stream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: { suppressLocalAudioPlayback: false } });
     } catch (e) {
       const name = e && e.name;
       return { ok: false, reason: name === 'NotAllowedError' || name === 'AbortError' || name === 'NotFoundError' ? 'cancelled' : 'unsupported' };
     }
+    const video = stream.getVideoTracks()[0];
+    const surface = video && video.getSettings ? video.getSettings().displaySurface : undefined;
     for (const t of stream.getVideoTracks()) t.stop();
     const audioTracks = stream.getAudioTracks();
     if (!audioTracks.length) { for (const t of stream.getTracks()) t.stop(); return { ok: false, reason: 'no-audio' }; }
     this.stopSystem();
-    const c = this.ensureContext();
+    const c = this.ensureContext(); await this.resume();
+    this.systemSurface = surface === 'browser' ? 'tab' : 'system';
     this.systemStream = new MediaStream(audioTracks);
     this.systemSource = c.createMediaStreamSource(this.systemStream);
     this.systemAnalyser = this.analyser();
@@ -89,7 +91,7 @@ export class AudioGraph {
   frames(time = 0) {
     let music = null, room = null, source = 'none';
     if (this.systemOn) {
-      this.systemAnalyser.getByteFrequencyData(this.musicBins); music = this.musicBins; source = 'system';
+      this.systemAnalyser.getByteFrequencyData(this.musicBins); music = this.musicBins; source = this.systemSurface;
       if (this.micOn) { this.micAnalyser.getByteFrequencyData(this.roomBins); room = this.roomBins; }
     } else if (this.playing) {
       this.playerAnalyser.getByteFrequencyData(this.musicBins); music = this.musicBins; source = 'player';
