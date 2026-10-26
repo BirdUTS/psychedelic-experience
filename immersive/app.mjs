@@ -12,6 +12,7 @@ import { SCENES } from './engine/arcs.mjs';
 import { AudioGraph } from './audio.mjs';
 import { Playlist } from './engine/playlist.mjs';
 import { PostFX } from './engine/post.mjs';
+import { defaultProgram } from './engine/grammar.mjs';
 import { JevClient, buildState } from './engine/jev-client.mjs';
 import { directorInput } from './engine/streams.mjs';
 import { requestActions } from './engine/requests.mjs';
@@ -42,6 +43,7 @@ const group = new THREE.Group(); scene.add(group);
 const clock = new THREE.Clock();
 const drawSize = renderer.getDrawingBufferSize(new THREE.Vector2());
 const post = new PostFX(renderer, { width: drawSize.x, height: drawSize.y });
+const program = defaultProgram();   // the program the stack renders this frame
 
 // ---------- engine ----------
 const sims = { physarum: new Physarum(), swarm: new Swarmalators(), boids: new Boids(), life: new Life(64, 1) };
@@ -68,9 +70,10 @@ let orbit = 0, pitch = 0.12, zoom = 19, attractor = null, attractorUntil = 0, xr
 let dissolving = null, jump = null, snapshotTimer = 0, rewindNote = '', fps = 60;
 const summary = { E30: 0, E5: 0, C30: 0, B30: 0, A30: 0 }, recentDecisions = [];
 let lastJevAsk = -Infinity;
-const timing = { step: 0, steps: 0, render: 0, dt: 0 };
+const timing = { step: 0, steps: 0, render: 0, post: 0, dt: 0 };
 window.__flow = {
-  director, audio, sims, worlds, ship, liveliness, rings, timing, jev, gestures,
+  director, audio, sims, worlds, ship, liveliness, rings, timing, jev, gestures, post, program,
+  forceProgram: null,   // a partial program merged over the computed one (checks)
   get musicF() { return musicF; }, get roomF() { return roomF; }, get depth() { return depth; }, set depth(v) { setDepth(v); },
   forceLiveliness: null, skipRender: false,
   get jump() { return jump; }, get world() { return world; }, get dissolving() { return dissolving; },
@@ -480,7 +483,11 @@ function frame(dt) {
   else {
     // The jump forces 8-fold with a 1 s fade so the fold completes before the switch back; a dive adds one fold step and more feedback.
     const diveFold = ship.diving ? Math.min(8, out.targets.S + 2) : out.targets.S;
-    post.render(scene, camera, { fold: jump ? 8 : diveFold, feedback: Math.min(1, out.targets.F + (jump ? 0.3 : 0) + (ship.diving ? 0.2 : 0)), pulse: out.pulse, dt, fadeSeconds: jump || ship.diving ? 1 : Math.min(8, 16 * 60 / Math.max(60, out.hud.bpm)) });
+    const F = Math.min(1, out.targets.F + (jump ? 0.3 : 0) + (ship.diving ? 0.2 : 0));
+    Object.assign(program, { fold: jump ? 8 : diveFold, echoDecay: F, echoZoom: F, echoSpin: F, tunnel: jump ? 1 : ship.diving ? 0.7 : 0, tunnelSpeed: 1 }, window.__flow.forceProgram);
+    const tPost = performance.now();
+    post.render(scene, camera, program, { pulse: out.pulse, beatPhase: out.phase, time: simClock, dt, quality: 1, fadeSeconds: jump || ship.diving ? 1 : Math.min(8, 16 * 60 / Math.max(60, out.hud.bpm)) });
+    timing.post = performance.now() - tPost;
   }
   if (now - lastHUD > 0.15) { lastHUD = now; updateHUD(out, frames, L); }
   if (!$('explain').hidden && now - lastExplain > 0.5) { lastExplain = now; updateExplain(out, L); }
