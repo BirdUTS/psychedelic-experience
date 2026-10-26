@@ -1,0 +1,59 @@
+/* Visual gestures (v3 §4.2): short sentences the world says at moments of change — take, yield, listen,
+   carry, surprise, rebirth, jump. One at a time; rebirth and jump pre-empt. Envelopes rise over the first
+   20 % of their length and fall to zero at the end. Pure. */
+export const GESTURES = ['take', 'yield', 'listen', 'carry', 'surprise', 'rebirth', 'jump'];
+const clamp01 = v => v < 0 ? 0 : v > 1 ? 1 : v;
+
+export class VisualGestures {
+  constructor({ hysteresis = 0.05, surpriseGap = 2 } = {}) {
+    this.h = hysteresis; this.gap = surpriseGap;
+    this.active = null; this.t = 0; this.length = 0; this.env = 0;
+    this.takeZone = 'below'; this.yieldZone = 'above';
+    this.leadFor = 0; this.lastSurprise = -Infinity; this.clock = 0; this.pulse = 0;
+    this.overrides = {};
+  }
+  start(name, length) { this.active = name; this.t = 0; this.length = Math.max(0.05, length); this.leadFor = 0; this.env = 0; }
+  update(dt, state = {}, events = {}) {
+    if (!(dt > 0)) return { active: this.active, env: this.env, overrides: this.overrides };
+    this.clock += dt;
+    const I = state.I ?? 0, A = state.A ?? 0, surprise = state.surprise ?? 0, bs = state.beatSeconds > 0 ? state.beatSeconds : 0.5;
+    // Threshold crossings with hysteresis.
+    let take = false, yieldNow = false;
+    if (I > 0.2 + this.h) { if (this.takeZone === 'below') take = true; this.takeZone = 'above'; } else if (I < 0.2 - this.h) this.takeZone = 'below';
+    if (I < -0.2 - this.h) { if (this.yieldZone === 'above') yieldNow = true; this.yieldZone = 'below'; } else if (I > -0.2 + this.h) this.yieldZone = 'above';
+    // Leading time since the last gesture (for carry).
+    if (I > 0.2) this.leadFor += dt; else this.leadFor = 0;
+    // Pre-empting events, then idle triggers in priority order.
+    if (events.rewind) this.start('rebirth', 2);
+    else if (events.jump) this.start('jump', 4);
+    else if (!this.active) {
+      if (take) this.start('take', 2 * bs);
+      else if (yieldNow) this.start('yield', 2 * bs);
+      else if (I < 0 && A > 0.5) this.start('listen', 4 * bs);
+      else if (surprise > 0.7 && this.clock - this.lastSurprise >= this.gap) { this.start('surprise', bs); this.lastSurprise = this.clock; }
+      else if (this.leadFor + 1e-9 >= 16 * bs) this.start('carry', 4 * bs);
+    }
+    // Listen pulses on onsets, decaying over a beat.
+    this.pulse = Math.max(0, this.pulse - dt / bs * 0.4);
+    if (this.active === 'listen' && events.onset > 0) this.pulse = Math.min(1, this.pulse + 0.4);
+    // Envelope and overrides.
+    const o = this.overrides = {};
+    if (this.active) {
+      this.t += dt;
+      const L = this.length, u = this.t / L;
+      this.env = u >= 1 ? 0 : u < 0.2 ? u / 0.2 : 1 - (u - 0.2) / 0.8;
+      const e = clamp01(this.env);
+      switch (this.active) {
+        case 'take': o.formKind = 'spiral'; o.formDrift = e; o.fold = 6; break;
+        case 'yield': o.breath = 0.6 * e; o.mirror = 'h'; o.formDensity = 0; break;
+        case 'listen': o.warp = this.pulse * e; break;
+        case 'carry': o.tunnel = 0.4 * e; break;
+        case 'surprise': o.chromaSplit = 0.8 * e; o.contour = 0.5 * e; break;
+        case 'rebirth': o.droste = e; break;
+        case 'jump': o.chromaSplit = 0.6 * e; break;
+      }
+      if (u >= 1) { this.active = null; this.env = 0; this.t = 0; }
+    } else this.env = 0;
+    return { active: this.active, env: this.env, overrides: o };
+  }
+}
