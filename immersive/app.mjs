@@ -18,7 +18,8 @@ import { Passages } from './engine/passages.mjs';
 import { VisualGestures } from './engine/visual-gestures.mjs';
 import { JevClient, buildState } from './engine/jev-client.mjs';
 import { directorInput } from './engine/streams.mjs';
-import { requestActions } from './engine/requests.mjs';
+import { requestActions, spokenMood } from './engine/requests.mjs';
+import { VoiceEnvelope } from './engine/voice.mjs';
 import { Liveliness } from './engine/liveliness.mjs';
 import { SnapshotRing } from './engine/snapshots.mjs';
 import { Ship } from './engine/ship.mjs';
@@ -47,7 +48,8 @@ const clock = new THREE.Clock();
 const drawSize = renderer.getDrawingBufferSize(new THREE.Vector2());
 const post = new PostFX(renderer, { width: drawSize.x, height: drawSize.y });
 const program = defaultProgram(), target = defaultProgram(), current = defaultProgram();   // rendered / grammar target / time-blended
-const visualGestures = new VisualGestures(), phases = new Phases(), passages = new Passages();
+const visualGestures = new VisualGestures(), phases = new Phases(), passages = new Passages(), voiceEnv = new VoiceEnvelope();
+let heard = '', heardUntil = -Infinity;   // the last words Talk heard, shown on the HUD for a few seconds
 
 // ---------- engine ----------
 const sims = { physarum: new Physarum(), swarm: new Swarmalators(), boids: new Boids(), life: new Life(64, 1) };
@@ -77,7 +79,7 @@ let lastJevAsk = -Infinity;
 const timing = { step: 0, steps: 0, render: 0, post: 0, dt: 0 };
 let calm = false, quality = 1, lowFpsFor = 0, highFpsFor = 0, programStarted = false, lastGestureEnd = -Infinity, prevGesture = null, rewindFired = false, jumpFired = false, lastJump = false, depthTouched = false, leavingByGlyph = false, landedFired = false;
 window.__flow = {
-  director, audio, sims, worlds, ship, liveliness, rings, timing, jev, gestures, post, program, target, current, visualGestures, phases, passages,
+  director, audio, sims, worlds, ship, liveliness, rings, timing, jev, gestures, post, program, target, current, visualGestures, phases, passages, voiceEnv, forceVoice: null, hear: text => hearText(text),
   forceProgram: null,   // a partial program merged over the computed one (checks)
   get calm() { return calm; }, set calm(v) { calm = !!v; $('calm').checked = calm; }, get quality() { return quality; }, immerse,
   get musicF() { return musicF; }, get roomF() { return roomF; }, get depth() { return depth; }, set depth(v) { setDepth(v); },
@@ -392,6 +394,8 @@ function localCommand(text) {
   if (is(/deeper|more symmetry|kaleid|對稱/)) { setDepth(depth + 0.2); handled = true; }
   if (is(/shallower|less symmetry|no symmetry|calm|gentle|靜|冷靜/)) { setDepth(depth - 0.2); handled = true; }
   if (is(/rewind|reset|again|snow|雪|重來/)) { rewind('voice'); handled = true; }
+  const mood = spokenMood(t);
+  if (mood) { director.setMood(mood); handled = true; }
   if (handled) bump();
   return handled;
 }
@@ -408,6 +412,7 @@ async function askJev(text = '', force = false) {
   const decision = await jev.maybeRequest(() => jevState(text), { force });
   if (!decision) { if (jev.lastError) $('decision').textContent = `JEV unavailable (${jev.lastError}); local rules continue.`; return; }
   director.applyDecision(decision);
+  if (text && decision.mood) director.setMood(decision.mood);   // a mood you asked for in words applies at once
   const applied = Object.keys(decision).filter(k => !['version', 'confidence', 'hold'].includes(k));
   const left = Object.keys(decision.confidence || {}).filter(k => !applied.includes(k));
   const line = `JEV: ${applied.map(k => k === 'scene' ? `scene→${decision.scene.choice} (${Math.round(decision.scene.p * 100)}%)` : `${k}=${typeof decision[k] === 'number' ? decision[k].toFixed(2) : decision[k]}`).join(' · ') || 'no change'}` +
@@ -417,23 +422,42 @@ async function askJev(text = '', force = false) {
 }
 $('jev').onclick = () => { jev.enabled = !jev.enabled; jev.bump(); if (!jev.enabled) director.clearMood(); $('jev').textContent = 'JEV: ' + (jev.enabled ? 'on' : 'off'); $('jev').setAttribute('aria-pressed', String(jev.enabled)); if (jev.enabled) askJev('', true); else $('decision').textContent = 'Local director running.'; };
 function decide(text = '') {
-  if (text && localCommand(text)) { $('decision').textContent = 'Applied locally: ' + text; return; }
+  // A short command is handled here; a longer sentence also goes to JEV (when on), so a stray word like 慢 inside it
+  // does not swallow the rest of what you said.
+  const sentence = text && (text.trim().split(/\s+/).length > 3 || /[\u3400-\u9fff]/.test(text) && text.replace(/\s/g, '').length > 6);
+  if (text && localCommand(text)) {
+    $('decision').textContent = 'Applied locally: ' + text;
+    if (sentence && jev.enabled && navigator.onLine) { $('decision').textContent += ' · asking JEV for the rest…'; askJev(text, true); }
+    return;
+  }
   if (!text) { $('decision').textContent = 'Local director running.'; return; }
   if (jev.enabled && navigator.onLine) { $('decision').textContent = 'Asking JEV…'; askJev(text, true); return; }
-  $('decision').textContent = 'Not a local phrase. Try: slower, faster, fish, mycelium, fireflies, life, hover, fly, lead me, follow me, hold, deeper, calm, rewind. Turn JEV on for free-form requests.';
+  $('decision').textContent = 'Not a local phrase. Try: dream, melt, electric, clear, holy (夢 溶 勁 清 神聖), slower, faster, fish, mycelium, fireflies, life, hover, fly, lead me, follow me, hold, deeper, calm, rewind. Turn JEV on for free-form requests.';
 }
-$('commandForm').onsubmit = e => { e.preventDefault(); const text = $('command').value.trim(); $('command').value = ''; if (text) decide(text); };
+$('commandForm').onsubmit = e => { e.preventDefault(); const text = $('command').value.trim(); $('command').value = ''; if (text) { hearText(text); decide(text); } };
 window.__flow.askJev = askJev; window.__flow.jevState = jevState;
 const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition; let recognition = null;
 if (!Recognition) { $('listen').disabled = true; $('listen').textContent = 'Type a request'; }
-else $('listen').onclick = () => {
-  if (recognition) { recognition.stop(); return; }
-  recognition = new Recognition(); recognition.lang = navigator.language || 'en-US'; recognition.continuous = false; recognition.interimResults = false;
-  recognition.onresult = e => decide(e.results[0][0].transcript);
-  recognition.onend = () => { recognition = null; $('listen').textContent = 'Say a request'; };
-  recognition.onerror = () => { $('decision').textContent = 'Speech recognition unavailable; type the request instead.'; };
-  try { recognition.start(); $('listen').textContent = 'Listening…'; $('decision').textContent = 'Browser speech recognition may use a network service. Only this one request is sent.'; } catch { recognition = null; }
-};
+else $('listen').onclick = () => setTalk(!talking);
+// Talk: keep listening for words until switched off. Each finished sentence goes to the local phrases, then to JEV.
+// Chrome's speech recognition sends the audio to Google while Talk is on; the room-mic analysis never leaves this machine.
+let talking = false;
+function setTalk(on) {
+  talking = on; $('listen').textContent = 'Talk: ' + (on ? 'on' : 'off'); $('listen').setAttribute('aria-pressed', String(on));
+  if (!on) { recognition?.stop(); recognition = null; $('decision').textContent = 'Talk off.'; return; }
+  $('decision').textContent = 'Talk on · speak freely. Chrome sends your speech to Google to turn it into words while Talk is on.' + (jev.enabled ? '' : ' Turn JEV on for free-form requests.');
+  startRecognition();
+}
+function startRecognition() {
+  if (!talking) return;
+  const r = recognition = new Recognition(); r.lang = $('talkLang').value; r.continuous = true; r.interimResults = false;
+  r.onresult = e => { for (let i = e.resultIndex; i < e.results.length; i++) if (e.results[i].isFinal) { const text = e.results[i][0].transcript.trim(); if (text) { hearText(text); decide(text); } } };
+  r.onerror = e => { if (e.error === 'not-allowed' || e.error === 'service-not-allowed') { setTalk(false); $('decision').textContent = 'Talk needs microphone permission (and Chrome online). Type the request instead.'; } };
+  r.onend = () => { if (talking && recognition === r) setTimeout(startRecognition, 300); };   // Chrome stops after a silence: listen again
+  try { r.start(); } catch { /* already started */ }
+}
+$('talkLang').onchange = () => { if (talking) { recognition?.stop(); } };
+function hearText(text) { heard = String(text).slice(0, 40); heardUntil = simClock + 4; touch(); }
 
 // ---------- the frame ----------
 function stepSims(h, out) {
@@ -525,7 +549,11 @@ function frame(dt) {
     // v3: the director's state becomes a program (grammar), blended over time; gestures speak on top of it.
     const beatSeconds = 60 / Math.max(60, out.hud.bpm);
     if (!paused) { passages.update({ phrase: out.phraseBoundary, landed: landedFired }); landedFired = false; }
-    programFor({ I: out.I, A: out.As, E: out.hud.E, C: out.hud.C, H: out.targets.H, L, heat: out.heat, ship: ship.mode, diving: ship.diving, jump: !!jump, calm, arcS: out.arcS, world, raw: passages.raw }, depth, target);
+    // Your voice (room speech or a clap; the mic alone plays both roles): analysed here, never recorded or sent.
+    const roomSpeech = frames.room ? roomF.speech : frames.source === 'mic' ? musicF.speech : 0;
+    const roomClap = frames.room ? roomF.onset : frames.source === 'mic' ? musicF.onset : 0;
+    const voice = window.__flow.forceVoice ?? (paused ? voiceEnv.value : voiceEnv.update(dt, { speech: roomSpeech, onset: roomClap }));
+    programFor({ I: out.I, A: out.As, E: out.hud.E, C: out.hud.C, H: out.targets.H, L, heat: out.heat, ship: ship.mode, diving: ship.diving, jump: !!jump, calm, arcS: out.arcS, world, raw: passages.raw, voice }, depth, target);
     // The arc's F axis biases the echo decay by ±0.2 around the arcs' neutral 0.3. (Its S axis has no room: Depth is
     // both the fold's floor (v2) and its ceiling (v3), so the fold is Depth's whenever the world leads.)
     target.echoDecay = Math.max(0, Math.min(1, target.echoDecay + 0.2 * Math.max(-1, Math.min(1, (out.targets.F - 0.3) / 0.7))));
@@ -544,6 +572,7 @@ function frame(dt) {
     const discreteOverride = !!g.active && DISCRETE.some(k => k in g.overrides);
     if (!programStarted || out.phraseBoundary || discreteOverride || !!jump !== lastJump || depthTouched) for (const k of DISCRETE) current[k] = target[k];
     programStarted = true; lastJump = !!jump; depthTouched = false;
+    current.ripple = target.ripple;   // the voice answers at once, not over the 2 s blend
     Object.assign(program, current);
     for (const k in g.overrides) {
       const v = g.overrides[k];
@@ -582,6 +611,8 @@ function updateHUD(out, frames, L) {
   if (!sound && !audio.synthetic) line += ' · tap to start sound';
   else if (frames.music) line += ` · ${Math.round(out.hud.bpm)} BPM · C ${out.hud.C.toFixed(2)}`;
   line += ` · life ${L.toFixed(2)}` + (out.heat > 0 ? ` · heat +${out.heat.toFixed(2)}` : '') + (dissolving ? ' · REWIND' : '') + (jump ? ' · JUMP' : '') + (ship.diving ? ' · DIVE' : '') + (passages.raw && !jump ? ' · RAW' : '') + (visualGestures.active ? ' · ' + visualGestures.active.toUpperCase() : '') + (paused ? ' · PAUSED' : '');
+  if (out.mood) line += ' · ' + out.mood.toUpperCase();
+  if (simClock < heardUntil) line += ` · “${heard}”`;
   line += navigator.onLine && jev.enabled ? ' · JEV' : ' · LOCAL';
   $('hud').textContent = line;
 }

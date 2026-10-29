@@ -13,12 +13,12 @@ const FRAGMENT = `
 precision highp float;
 uniform sampler2D tScene; uniform sampler2D tPrev;
 uniform vec2 resolution; uniform float aspect; uniform float pixelRatio;
-uniform float warpPhase; uniform float tunnelScroll; uniform float beatPhase; uniform float pulse; uniform float quality;
+uniform float warpPhase; uniform float tunnelScroll; uniform float ripplePhase; uniform float beatPhase; uniform float pulse; uniform float quality;
 uniform float fold; uniform float foldPrev; uniform float foldMix; uniform int mirror; uniform int formKind;
 uniform float droste; uniform float tunnel; uniform float tunnelSpeed;
 uniform float formDensity; uniform float formDrift; uniform float formContrast;
 uniform float warp; uniform float warpScale; uniform float warpRate; uniform float breath;
-uniform float contour; uniform float contourLine; uniform float chromaSplit;
+uniform float contour; uniform float contourLine; uniform float chromaSplit; uniform float ripple;
 uniform float uZoom; uniform float uRot; uniform float uDecay; uniform float uGain;
 varying vec2 vUv;
 const float PI = 3.14159265; const float TAU = 6.28318531;
@@ -57,6 +57,8 @@ void main(){
   c *= 1.0 + b * (0.5 + 2.0 * dot(c, c));
   // warp: iterated sine domain warping (melting)
   vec2 p = c;
+  // ripple: your voice pushes rings outward through the world
+  if (ripple > 0.0) { float rr = length(p); if (rr > 1e-4) p += (p / rr) * 0.02 * ripple * sin(rr * 26.0 - ripplePhase); }
   if (warp > 0.0) {
     float k = 2.0 + 10.0 * warpScale, t = warpPhase, amp = 0.04 * warp;
     for (int i = 0; i < 6; i++) { if (float(i) >= 6.0 * quality) break; p += amp * sin(p.yx * k + t + float(i) * 1.7); }
@@ -104,6 +106,7 @@ const DISPLAY = `
 precision highp float;
 uniform sampler2D tInput; uniform float aspect; uniform float beatPhase; uniform float formPhase; uniform float hueAngle;
 uniform int formKind; uniform float formDensity; uniform float formDrift; uniform float formContrast;
+uniform float ripple; uniform float ripplePhase;
 varying vec2 vUv;
 const float TAU = 6.28318531;
 float ang(vec2 c){ return dot(c, c) > 1e-10 ? atan(c.y, c.x) : 0.0; }
@@ -133,10 +136,16 @@ void main(){
     float keep = 0.25 + 0.75 * smoothstep(0.0, 0.5, mx);   // dark space stays mostly dark under the stripes
     col = 1.0 - (1.0 - col) * (1.0 - v * formContrast * keep * tint);
   }
+  // your voice, drawn as faint rings travelling outward in the picture's own colour (display only, never fed back)
+  if (ripple > 0.0) {
+    float rr = length(c), ring = smoothstep(0.75, 1.0, 0.5 + 0.5 * sin(rr * 26.0 - ripplePhase)) * smoothstep(0.02, 0.1, rr) * (1.0 - smoothstep(0.6, 0.9, rr));
+    float mx = max(col.r, max(col.g, col.b));
+    col = 1.0 - (1.0 - col) * (1.0 - 0.35 * ripple * ring * mix(vec3(0.7), col / max(mx, 0.05), 0.5));
+  }
   gl_FragColor = vec4(col, 1.0);
 }`;
 
-const DIRECT = ['droste', 'tunnel', 'tunnelSpeed', 'formDensity', 'formDrift', 'formContrast', 'warp', 'warpScale', 'warpRate', 'breath', 'contour', 'contourLine', 'chromaSplit'];
+const DIRECT = ['droste', 'tunnel', 'tunnelSpeed', 'formDensity', 'formDrift', 'formContrast', 'warp', 'warpScale', 'warpRate', 'breath', 'contour', 'contourLine', 'chromaSplit', 'ripple'];
 const clamp = (v, lo, hi) => (v = Number(v) || 0) < lo ? lo : v > hi ? hi : v;
 
 export class PostFX {
@@ -150,14 +159,14 @@ export class PostFX {
     const u = this.uniforms = {
       tScene: { value: this.sceneTarget.texture }, tPrev: { value: this.ping.texture },
       resolution: { value: new THREE.Vector2(w, h) }, aspect: { value: w / h }, pixelRatio: { value: 1 },
-      warpPhase: { value: 0 }, tunnelScroll: { value: 0 }, beatPhase: { value: 0 }, pulse: { value: 0 }, quality: { value: 1 },
+      warpPhase: { value: 0 }, tunnelScroll: { value: 0 }, ripplePhase: { value: 0 }, beatPhase: { value: 0 }, pulse: { value: 0 }, quality: { value: 1 },
       fold: { value: 0 }, foldPrev: { value: 0 }, foldMix: { value: 1 }, mirror: { value: 0 }, formKind: { value: 0 },
       uZoom: { value: 1 }, uRot: { value: 0 }, uDecay: { value: 0.8 }, uGain: { value: 1.25 },
     };
     for (const k of DIRECT) u[k] = { value: 0 };
     this.material = new THREE.ShaderMaterial({ uniforms: u, vertexShader: VERTEX, fragmentShader: FRAGMENT, depthTest: false, depthWrite: false });
     this.quad = new THREE.Scene(); this.quad.add(new THREE.Mesh(new THREE.PlaneGeometry(2, 2), this.material));
-    const d = this.display = { tInput: { value: this.pong.texture }, aspect: { value: w / h }, beatPhase: { value: 0 }, formPhase: { value: 0 }, hueAngle: { value: 0 }, formKind: { value: 0 }, formDensity: { value: 0 }, formDrift: { value: 0 }, formContrast: { value: 0 } };
+    const d = this.display = { tInput: { value: this.pong.texture }, aspect: { value: w / h }, beatPhase: { value: 0 }, formPhase: { value: 0 }, hueAngle: { value: 0 }, formKind: { value: 0 }, formDensity: { value: 0 }, formDrift: { value: 0 }, formContrast: { value: 0 }, ripple: { value: 0 }, ripplePhase: { value: 0 } };
     this.copyMaterial = new THREE.ShaderMaterial({ uniforms: d, vertexShader: VERTEX, fragmentShader: DISPLAY, depthTest: false, depthWrite: false });
     this.blit = new THREE.Scene(); this.blit.add(new THREE.Mesh(new THREE.PlaneGeometry(2, 2), this.copyMaterial));
     this.fold = 0; this.foldPrev = 0; this.foldMix = 1;
@@ -185,7 +194,7 @@ export class PostFX {
     u.uRot.value = 0.004 * clamp(p.echoSpin, 0, 1);
     u.uDecay.value = 0.80 + 0.16 * clamp(p.echoDecay, 0, 1);
     u.uGain.value = 0.5 + 1.25 * clamp(p.gain, 0, 1);
-    u.warpPhase.value = phases ? phases.warp : 0; u.tunnelScroll.value = phases ? phases.tunnel : 0;
+    u.warpPhase.value = phases ? phases.warp : 0; u.tunnelScroll.value = phases ? phases.tunnel : 0; u.ripplePhase.value = phases ? phases.ripple : 0;
     u.beatPhase.value = beatPhase; u.pulse.value = pulse; u.quality.value = clamp(quality, 0, 1);
     u.pixelRatio.value = r.getPixelRatio();
     const previousTarget = r.getRenderTarget();
@@ -194,6 +203,7 @@ export class PostFX {
     r.setRenderTarget(this.pong); r.render(this.quad, this.camera);
     const d = this.display;
     d.tInput.value = this.pong.texture; d.beatPhase.value = beatPhase; d.formPhase.value = phases ? phases.form : 0; d.hueAngle.value = phases ? phases.hue : 0; d.formKind.value = u.formKind.value;
+    d.ripple.value = u.ripple.value; d.ripplePhase.value = u.ripplePhase.value;
     d.formDensity.value = u.formDensity.value; d.formDrift.value = u.formDrift.value; d.formContrast.value = u.formContrast.value;
     r.setRenderTarget(previousTarget); r.render(this.blit, this.camera);
     [this.ping, this.pong] = [this.pong, this.ping];

@@ -61,6 +61,8 @@ export class Director {
   }
 
   clearMood() { this.mood = null; this.pendingMood = null; }
+  // A mood you asked for in words applies at once (your request, like your hand on Depth).
+  setMood(mood) { if (MOODS.includes(mood)) { this.mood = mood; this.pendingMood = null; } }
 
   applyDecision(decision) {
     if (!decision || typeof decision !== 'object') return;

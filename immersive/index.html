@@ -34,7 +34,8 @@
 <div class="row"><button id="systemAudio" aria-pressed="false">Computer music: off</button><button id="roomMic" aria-pressed="false">Room mic: off</button><button id="synthetic" aria-pressed="false">Synthetic beat: off</button></div>
 <p id="audioStatus" role="status">No sound source yet. Share your computer's music (no headphones needed), pick a demo, turn on the room mic, or use the labelled synthetic beat.</p>
 <div class="micro divider">DIRECTOR · OPTIONAL ONLINE</div>
-<div class="row"><button id="jev" aria-pressed="false">JEV: off</button><button id="listen">Say a request</button></div>
+<div class="row"><button id="jev" aria-pressed="false">JEV: off</button><button id="listen" aria-pressed="false">Talk: off</button></div>
+<label class="check" id="talkLangRow">Talk language <select id="talkLang"><option value="yue-Hant-HK">廣東話</option><option value="en-AU">English</option><option value="cmn-Hans-CN">普通话</option></select></label>
 <form id="commandForm"><input id="command" placeholder="e.g. surround me · slower · warmer · hold" maxlength="180" aria-label="Request"><button>Send</button></form>
 <p id="decision" role="status">Local director running. Works with no network.</p>
 <button id="offline">Download offline assets</button><p id="offlineStatus" role="status">Download once before going offline.</p>

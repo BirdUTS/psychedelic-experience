@@ -1,0 +1,6 @@
+import {test} from 'node:test'; import assert from 'node:assert/strict';
+import {VoiceEnvelope} from '../immersive/engine/voice.mjs';
+import {spokenMood} from '../immersive/engine/requests.mjs';
+const dt=1/60;
+test('the voice envelope rises within a tenth of a second and falls over about a second',()=>{const v=new VoiceEnvelope();let t=0;while(v.value<.6&&t<1){v.update(dt,{speech:.9,onset:0});t+=dt}assert(t<=.15,`rise ${t}`);for(let k=0;k<30;k++)v.update(dt,{speech:0,onset:0});assert(v.value>.1&&v.value<.6,`after .5 s ${v.value}`);for(let k=0;k<120;k++)v.update(dt,{speech:0,onset:0});assert(v.value<.05);v.update(dt,{speech:0,onset:1});assert(v.value>.3,'a clap counts too');const n=new VoiceEnvelope();n.update(dt,{speech:NaN,onset:undefined});assert.equal(n.value,0)});
+test('spoken moods in English and Cantonese; anything else is not a mood',()=>{const cases=[['make it dreamy','dream'],['夢幻啲','dream'],['melt it','melt'],['溶晒佢','melt'],['more electric','electric'],['勁啲','electric'],['clearer please','clear'],['清啲','clear'],['holy','holy'],['神聖啲','holy']];for(const [t,m] of cases)assert.equal(spokenMood(t),m,t);for(const t of ['slower','fish','','電腦好慢'])assert.equal(spokenMood(t),null,t)});

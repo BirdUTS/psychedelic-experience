@@ -8,7 +8,7 @@ export const FORM_KINDS = ['tunnel', 'spiral', 'cobweb', 'lattice'];
 export const MIRRORS = ['none', 'h', 'v', 'quad'];
 export const MOODS = ['clear', 'dream', 'melt', 'electric', 'holy'];
 export const CONTINUOUS = ['echoDecay', 'echoZoom', 'echoSpin', 'droste', 'tunnel', 'tunnelSpeed', 'formDensity', 'formDrift', 'formContrast',
-  'warp', 'warpScale', 'warpRate', 'breath', 'contour', 'contourLine', 'chromaSplit', 'chromaCycle', 'gain'];
+  'warp', 'warpScale', 'warpRate', 'breath', 'contour', 'contourLine', 'chromaSplit', 'chromaCycle', 'gain', 'ripple'];
 export const DISCRETE = ['fold', 'mirror', 'formKind'];
 
 const clamp = (v, lo, hi) => v < lo ? lo : v > hi ? hi : v;
@@ -20,7 +20,7 @@ export function defaultProgram() {
     echoDecay: 0, echoZoom: 0, echoSpin: 0, droste: 0, tunnel: 0, tunnelSpeed: 0,
     formDensity: 0, formDrift: 0, formContrast: 0,
     warp: 0, warpScale: 0.5, warpRate: 0.3, breath: 0, contour: 0, contourLine: 0.5,
-    chromaSplit: 0, chromaCycle: 0, gain: 0.6,
+    chromaSplit: 0, chromaCycle: 0, gain: 0.6, ripple: 0,
   };
 }
 
@@ -50,6 +50,9 @@ export function programFor(state, depth, into = defaultProgram()) {
   p.tunnelSpeed = jump ? 1 : diving ? 1 : 0.4;
   p.gain = calm ? Math.min(0.5, 0.3 + 0.7 * d) : clamp01(0.3 + 0.7 * d);
   if (p.fold === 0) p.formContrast *= 0.5;   // with no kaleidoscope the forms step back too
+  // Your voice: rings ripple out from the centre while you speak or clap (always visible, gently at Depth 0).
+  const voice = clamp01(Number.isFinite(s.voice) ? s.voice : 0);
+  p.ripple = voice * Math.max(d, 0.3); p.breath = clamp01(p.breath + 0.3 * voice);
   applySignature(p, s.world, d, leading);
   if (s.raw && !jump) {
     // A raw passage: the world itself and its echo, nothing folded or laid over it.
@@ -90,6 +93,7 @@ export function capProgram(p, depth) {
   p.formContrast = Math.min(p.formContrast, 0.6 * d);
   p.chromaSplit = Math.min(p.chromaSplit, 0.6 * d);
   p.gain = Math.min(p.gain, 0.3 + 0.7 * d);
+  p.ripple = Math.min(p.ripple, Math.max(d, 0.3));
   return p;
 }
 

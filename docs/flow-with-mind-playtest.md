@@ -1,5 +1,25 @@
 # Flow with Mind — how to start, what to try, what was tested
 
+## v3.2 (2026-10-30): JEV locally, and a picture that answers your voice
+
+**Start the local version with JEV** (JEV needs this local server: GitHub Pages is static and the API key stays server-side):
+
+```bash
+cd ~/Projects/psychedelic-experience
+python3 scripts/serve_worlds.py --port 8766
+```
+
+Open http://127.0.0.1:8766/immersive/ in Chrome → ⚙ → **JEV: on** (the decision line shows what JEV chose: scene, energy, palette, mood, hold). The key is read from `TYPESAFE_API_KEY` or the AI Lab `.env`.
+
+**Two ways the picture answers you:**
+
+- **Your voice, as sound** — ⚙ → **Room mic: on**. While you speak or clap, rings ripple outward from the centre and the frame breathes; they fade about a second after you stop. Always visible, also in raw passages and at Depth 0 (gently). Analysed on this Mac only: nothing recorded or sent.
+- **Your words** — ⚙ → **Talk: on** (pick 廣東話 / English / 普通话). Talk keeps listening until you switch it off; each finished sentence shows on the HUD (`· "溶晒佢"`). Mood words apply at once: dream 夢, melt 溶, electric 勁 / 電, clear 清, holy 神聖. Short commands are handled locally (slower 慢, fish 魚, fly 飛, rewind 重來…); a longer sentence also goes to JEV, which picks scene, energy, palette and a mood from what you said (tested: 「好似喺星空入面飄浮，一切都好安靜」 → mood dream, energy 0.28, palette silk; 「慢慢落去一個好深嘅洞入面」 → slower locally + mood dream). The HUD shows the active mood (`· DREAM`). **Privacy:** while Talk is on, Chrome sends your speech to Google to turn it into words; the room-mic ripple never leaves the machine. Typing in the request box does the same without Talk.
+
+Tested by machine: 155 tests (voice envelope rise/fall and claps, spoken moods in English and Cantonese with 電腦 not counted, immediate mood, ripple bounded and visible at Depth 0 and in raw passages, ripple phase). Tested in the app's pane: ripple 0 → 0.5 at Depth 0.5 when the voice is forced; typed 「溶晒佢」 → `MELT` at once; live JEV decisions for two Cantonese sentences; no console errors from the app. **Not tested:** a real microphone and real Talk recognition (the pane blocks capture) — try both in Chrome. Cache `extra-worlds-v11`.
+
+---
+
 ## v3.1 (2026-10-26): not one kaleidoscope
 
 Bird after the first v3 look: the mycelium sphere and the fish had disappeared under one constant kaleidoscope. Cause: v3 set the fold to Depth's ceiling whenever the world led (almost always, from the +0.3 baseline), so Depth 0.5 meant 4-fold all the time, with Klüver rings and the flight tunnel on top; the review pass then removed the arc's fold bias, so nothing varied it. Three changes:

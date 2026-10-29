@@ -15,3 +15,11 @@ export function requestActions(action, { sceneLocked = false, symmetry = 0 } = {
     default: return [];
   }
 }
+
+// A mood named in words (English or Cantonese), for spoken or typed requests; null when no mood is named.
+const SPOKEN_MOODS = [['holy', /holy|神聖|聖/], ['electric', /electric|勁|電(?!腦|話|視)/], ['melt', /melt|溶/], ['dream', /dream|夢/], ['clear', /clear|清/]];
+export function spokenMood(text) {
+  const t = String(text || '').toLowerCase();
+  for (const [mood, re] of SPOKEN_MOODS) if (re.test(t)) return mood;
+  return null;
+}
