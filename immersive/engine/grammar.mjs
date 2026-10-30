@@ -36,7 +36,8 @@ export function programFor(state, depth, into = defaultProgram()) {
   // The arc carries the fold (v1/v2 waypoints: Tidal opens at 0 and builds); Depth is only its ceiling.
   const arcS = Number.isFinite(s.arcS) ? s.arcS : foldCap;
   p.fold = leading ? FOLDS.filter(f => f <= Math.min(foldCap, arcS)).pop() : 0;
-  p.mirror = jump ? 'quad' : leading ? 'none' : (A > 0.5 ? 'h' : 'quad');
+  // Following mirrors toward you when you act, and into a quad only once the arc has built some symmetry.
+  p.mirror = jump ? 'quad' : leading ? 'none' : (A > 0.5 ? 'h' : arcS >= 4 ? 'quad' : 'none');
   const warpBase = (leading ? 0.2 + 0.5 * H : 0.2 + 0.6 * A + 0.3 * H) + 0.5 * heat;
   p.warp = clamp01(Math.min(Math.max(d, 0.1), warpBase));
   p.warpScale = 0.5; p.warpRate = clamp01(0.2 + 0.4 * E);

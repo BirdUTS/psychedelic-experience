@@ -1,5 +1,21 @@
 # Flow with Mind — how to start, what to try, what was tested
 
+## v3.3 (2026-10-30): the observer moves — shots instead of one kaleidoscope
+
+Bird: still kaleidoscope style; wanted the observer's angle to change, e.g. Game of Life as a planet watched from a satellite. Two more causes of the "kaleidoscope look" were found: following defaulted to a four-way mirror even with no fold, and the camera only ever orbited a sphere or flew a tunnel.
+
+- **Shots** (`engine/shots.mjs`): in hover, each world has four viewpoints and the director glides to the next one every two phrases (a 2.5 s camera glide, not a cut); a new world starts on its first shot. Only the last shot of each world is dressed (kaleidoscope allowed); the others are clean — no fold, no mirror, no form rings, no tunnel — so the kaleidoscope is a climax, not the ground.
+  - **Life — a planet:** satellite orbit (an inclined orbit, the whole globe in view: a dark ocean with a lit rim, a thin glowing atmosphere, living cells as lights that grow into towers with age) → low orbit skimming the surface toward the curved horizon → the planet from far away through a long lens → kaleidoscope orbit.
+  - **Mycelium:** satellite orbit of the sphere → a petri dish seen from above (the network's veins under a microscope) → inside the sphere, the network as your sky → kaleidoscope orbit.
+  - **Fireflies:** a galaxy far away → inside the swarm → following one firefly → kaleidoscope orbit.
+  - **Fish:** the tank from the side → following one fish (the school becomes a vortex around you) → looking up from below → kaleidoscope orbit.
+- **Choosing a view:** press **C**, the drawer's **View** button, or say / type 衛星 (satellite), 入面 (inside), 跟住 (chase), 下面 (below), 換角度 (next). Drag still turns the orbit and the wheel still zooms. Tap still launches the ship (the flight tunnels are unchanged); a view word brings you back to hover. The HUD names the current shot.
+- **Mirror:** following mirrors toward you when you act (h), and into a quad only once the arc has built some symmetry (arc S ≥ 4). "Follow me" now needs 跟我 / 跟住我, so 跟住一條魚 picks the chase view instead.
+
+Tested by machine: 160 tests (every world has ≥ 4 shots, opens clean, one dressed; the two-phrase schedule, world restart, step and pick; every pose finite with the observer where the shot says — satellite 18–26 from the planet, low orbit 8.5–10 looking at the horizon, chase 3–6 behind and looking ahead, below under the target, telephoto narrower than the satellite; view words; the softer mirror rule). Screenshotted in the app's pane: all twelve clean shots plus the planet. Cache `extra-worlds-v12`. **Not tested:** how the glides feel at 60 fps, and motion comfort in the chase shots.
+
+---
+
 ## v3.2 (2026-10-30): JEV locally, and a picture that answers your voice
 
 **Start the local version with JEV** (JEV needs this local server: GitHub Pages is static and the API key stays server-side):

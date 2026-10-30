@@ -15,6 +15,7 @@ import { PostFX } from './engine/post.mjs';
 import { defaultProgram, programFor, applyMood, capProgram, CONTINUOUS, DISCRETE } from './engine/grammar.mjs';
 import { Phases } from './engine/phases.mjs';
 import { Passages } from './engine/passages.mjs';
+import { ShotDirector, shotPose, shotForWords } from './engine/shots.mjs';
 import { VisualGestures } from './engine/visual-gestures.mjs';
 import { JevClient, buildState } from './engine/jev-client.mjs';
 import { directorInput } from './engine/streams.mjs';
@@ -49,7 +50,9 @@ const drawSize = renderer.getDrawingBufferSize(new THREE.Vector2());
 const post = new PostFX(renderer, { width: drawSize.x, height: drawSize.y });
 const program = defaultProgram(), target = defaultProgram(), current = defaultProgram();   // rendered / grammar target / time-blended
 const visualGestures = new VisualGestures(), phases = new Phases(), passages = new Passages(), voiceEnv = new VoiceEnvelope();
-let heard = '', heardUntil = -Infinity;   // the last words Talk heard, shown on the HUD for a few seconds
+let heard = '', heardUntil = -Infinity;
+const shots = new ShotDirector('physarum'), camPos = new THREE.Vector3(0, 2, 19), camLook = new THREE.Vector3(), poseV = new THREE.Vector3();
+let shotStarted = 0, chaseIndex = 0, shotGlide = 0;   // the last words Talk heard, shown on the HUD for a few seconds
 
 // ---------- engine ----------
 const sims = { physarum: new Physarum(), swarm: new Swarmalators(), boids: new Boids(), life: new Life(64, 1) };
@@ -79,7 +82,7 @@ let lastJevAsk = -Infinity;
 const timing = { step: 0, steps: 0, render: 0, post: 0, dt: 0 };
 let calm = false, quality = 1, lowFpsFor = 0, highFpsFor = 0, programStarted = false, lastGestureEnd = -Infinity, prevGesture = null, rewindFired = false, jumpFired = false, lastJump = false, depthTouched = false, leavingByGlyph = false, landedFired = false;
 window.__flow = {
-  director, audio, sims, worlds, ship, liveliness, rings, timing, jev, gestures, post, program, target, current, visualGestures, phases, passages, voiceEnv, forceVoice: null, hear: text => hearText(text),
+  director, audio, sims, worlds, ship, liveliness, rings, timing, jev, gestures, post, program, target, current, visualGestures, phases, passages, voiceEnv, shots, nextShot: () => nextShot(), pickShot: n => pickShot(n), forceVoice: null, hear: text => hearText(text),
   forceProgram: null,   // a partial program merged over the computed one (checks)
   get calm() { return calm; }, set calm(v) { calm = !!v; $('calm').checked = calm; }, get quality() { return quality; }, immerse,
   get musicF() { return musicF; }, get roomF() { return roomF; }, get depth() { return depth; }, set depth(v) { setDepth(v); },
@@ -92,7 +95,7 @@ window.__flow = {
 // ---------- worlds, scenes, snapshots ----------
 function choose(id, { auto = false } = {}) {
   if (!WORLDS[id]) return;
-  world = id; worlds.build(id, ship.mode, $('skin').value);
+  world = id; shots.update({ world: id }); worlds.build(id, ship.mode, $('skin').value, shots.shot.layout || 'sphere'); startShot();
   const a = WORLDS[id];
   $('chapter').textContent = a[0]; $('worldTitle').innerHTML = a[1]; $('worldHint').textContent = a[2]; $('rule').textContent = a[3];
   document.querySelectorAll('[data-world]').forEach(b => { const on = b.dataset.world === id; b.classList.toggle('selected', on); b.setAttribute('aria-pressed', String(on)); });
@@ -137,7 +140,7 @@ function updateJump(dt) {
 }
 function setShipMode(mode) {
   if (mode === 'ship') ship.launch(); else ship.hover();
-  worlds.build(world, ship.mode, $('skin').value);
+  worlds.build(world, ship.mode, $('skin').value, shots.shot.layout || 'sphere');
   $('hoverToggle').textContent = 'Hover: ' + (ship.mode === 'hover' ? 'on' : 'off'); $('hoverToggle').setAttribute('aria-pressed', String(ship.mode === 'hover'));
   $('ringMode').textContent = (autoInitiative ? 'auto' : 'locked') + ' · ' + (ship.mode === 'ship' ? 'ship' : 'hover');
   touch();
@@ -253,6 +256,7 @@ addEventListener('keydown', e => {
     case '+': case '=': setDepth(depth + 0.1); break; case '-': setDepth(depth - 0.1); break;
     case 'h': case 'H': toggleLock(); break; case 'r': case 'R': rewind('key'); break;
     case 'v': case 'V': setShipMode(ship.mode === 'ship' ? 'hover' : 'ship'); break;
+    case 'c': case 'C': nextShot(); break;
     case 'p': case 'P': setPause(!paused); break;
     case 'Escape': if (!document.fullscreenElement) toggleDrawer(); break;   // in fullscreen the browser's Esc leaves it first
   }
@@ -278,7 +282,18 @@ $('rewind').onclick = () => rewind('button');
 $('reset').onclick = () => { const s = sims[world]; if (world === 'life') s.seed(++seed); else s.reset(++seed); s.resync?.(); liveliness.reset(world); bump(); };
 $('arc').onchange = () => { const v = $('arc').value; if (v === 'auto') { director.arcs.pin(false); $('pinArc').textContent = 'Pin arc: off'; $('pinArc').setAttribute('aria-pressed', 'false'); } else director.arcs.select(v, { pin: $('pinArc').getAttribute('aria-pressed') === 'true' }); bump(); };
 $('pinArc').onclick = () => { const on = $('pinArc').getAttribute('aria-pressed') !== 'true'; director.arcs.pin(on); $('pinArc').textContent = 'Pin arc: ' + (on ? 'on' : 'off'); $('pinArc').setAttribute('aria-pressed', String(on)); };
-$('skin').onchange = () => { if (world === 'boids') worlds.build(world, ship.mode, $('skin').value); };
+$('skin').onchange = () => { if (world === 'boids') worlds.build(world, ship.mode, $('skin').value, shots.shot.layout || 'sphere'); };
+// The observer: shots change every two phrases in hover; C, the View button or words like 衛星 / 跟住 / 換角度 step or pick.
+function startShot() {
+  shotStarted = simTime; shotGlide = 2.5;
+  const sim = sims[world]; chaseIndex = sim && sim.active ? Math.floor(Math.random() * sim.active) : 0;
+  if (world === 'physarum' && ship.mode === 'hover' && (shots.shot.layout || 'sphere') !== worlds.layout) worlds.build(world, ship.mode, $('skin').value, shots.shot.layout || 'sphere');
+  viewLabel();
+}
+function viewLabel() { $('viewBtn').textContent = 'View: ' + shots.shot.label; }
+function nextShot() { if (ship.mode === 'ship') setShipMode('hover'); shots.next(); startShot(); touch(); }
+function pickShot(name) { if (ship.mode === 'ship') setShipMode('hover'); if (name === 'next' || !shots.pick(name)) shots.next(); startShot(); touch(); }
+$('viewBtn').onclick = () => nextShot();
 $('lifePure').onchange = () => { sims.life.pure = $('lifePure').checked; };
 function setPause(v) { paused = v; $('pause').textContent = v ? 'Resume' : 'Pause'; $('pause').setAttribute('aria-pressed', String(v)); }
 setPause(paused); $('pause').onclick = () => setPause(!paused);
@@ -389,7 +404,9 @@ function localCommand(text) {
   if (is(/surround|inside|around me|包圍|hover|stop moving/)) { setShipMode('hover'); handled = true; }
   if (is(/fly|launch|take off|飛|出發/)) { setShipMode('ship'); handled = true; }
   if (is(/lead me|take over|帶/)) { director.initiative.setBaseline(0.6); setAuto(true); handled = true; }
-  if (is(/follow me|跟/)) { director.initiative.setBaseline(-0.6); setAuto(true); handled = true; }
+  if (is(/follow me|跟我|跟住我/)) { director.initiative.setBaseline(-0.6); setAuto(true); handled = true; }
+  const view = shotForWords(t);
+  if (view) { pickShot(view); handled = true; }
   if (is(/hold|stay|don.t change|唔好轉|keep/)) { toggleLock(true); handled = true; }
   if (is(/deeper|more symmetry|kaleid|對稱/)) { setDepth(depth + 0.2); handled = true; }
   if (is(/shallower|less symmetry|no symmetry|calm|gentle|靜|冷靜/)) { setDepth(depth - 0.2); handled = true; }
@@ -540,20 +557,37 @@ function frame(dt) {
   }
   if (window.__flow.skipRender) { if (now - lastHUD > 0.15) { lastHUD = now; updateHUD(out, frames, L); } return; }
   if (!renderer.xr.isPresenting) {
-    if (ship.mode === 'ship') { camera.position.set(0, 0, 0); camera.rotation.set(ship.pitch * RAD, ship.yaw * RAD, ship.roll * RAD, 'YXZ'); }
-    else if (zoom < 0.1) { camera.position.set(0, 0, 0); camera.rotation.set(pitch, orbit, 0, 'YXZ'); }
-    else { const a = orbit + simTime * 0.025; camera.position.set(Math.sin(a) * zoom, Math.sin(pitch) * zoom, Math.cos(a) * zoom); camera.lookAt(0, 0, 0); }
+    if (ship.mode === 'ship') { camera.position.set(0, 0, 0); camera.rotation.set(ship.pitch * RAD, ship.yaw * RAD, ship.roll * RAD, 'YXZ'); camPos.set(0, 0, 0); if (camera.fov !== 65) { camera.fov = 65; camera.updateProjectionMatrix(); } scene.fog.density = 0.022; }
+    else {
+      // Hover: the shot's pose, eased so a change of shot is a glide, not a cut; a chase keeps up more tightly.
+      const sim = sims[world], name = shots.shot.name; let target = [0, 0, 0], vel = [0, 0, 1];
+      if ((world === 'swarm' || world === 'boids') && sim.active) {
+        if (name === 'chase') { const i = Math.min(chaseIndex, sim.active - 1) * 3, v = world === 'boids' ? sim.v : sim.delta; target = [sim.p[i], sim.p[i + 1], sim.p[i + 2]]; vel = [v[i], v[i + 1], v[i + 2]]; }
+        else { let cx = 0, cy = 0, cz = 0; for (let i = 0; i < sim.active; i++) { cx += sim.p[i * 3]; cy += sim.p[i * 3 + 1]; cz += sim.p[i * 3 + 2]; } target = [cx / sim.active, cy / sim.active, cz / sim.active]; }
+      }
+      const pose = shotPose(name, { t: simTime - shotStarted + 20, target, vel, yaw: orbit, zoom: zoom / 19 });
+      shotGlide = Math.max(0, shotGlide - dt);
+      const tau = name === 'chase' && shotGlide <= 0 ? 0.35 : shotGlide > 0 ? 1.4 : 0.6, k = 1 - Math.exp(-dt / tau);
+      camPos.lerp(poseV.fromArray(pose.pos), k); camLook.lerp(poseV.fromArray(pose.look), k);
+      camera.position.copy(camPos); camera.lookAt(camLook);
+      const fogTo = name === 'distant' || name === 'far' || name === 'side' ? 0.005 : 0.022; scene.fog.density += (fogTo - scene.fog.density) * k;   // long shots see through the haze
+      if (Math.abs(camera.fov - pose.fov) > 0.05) { camera.fov += (pose.fov - camera.fov) * k; camera.updateProjectionMatrix(); }
+    }
   }
   if (renderer.xr.isPresenting) renderer.render(scene, camera);
   else {
     // v3: the director's state becomes a program (grammar), blended over time; gestures speak on top of it.
     const beatSeconds = 60 / Math.max(60, out.hud.bpm);
-    if (!paused) { passages.update({ phrase: out.phraseBoundary, landed: landedFired }); landedFired = false; }
+    if (!paused) {
+      passages.update({ phrase: out.phraseBoundary, landed: landedFired }); landedFired = false;
+      if (ship.mode === 'hover' && !jump) { shots.update({ phrase: out.phraseBoundary, world }); if (shots.changed) startShot(); }
+    }
+    const cleanShot = ship.mode === 'hover' && !jump && shots.shot.clean, rawNow = passages.raw || cleanShot;
     // Your voice (room speech or a clap; the mic alone plays both roles): analysed here, never recorded or sent.
     const roomSpeech = frames.room ? roomF.speech : frames.source === 'mic' ? musicF.speech : 0;
     const roomClap = frames.room ? roomF.onset : frames.source === 'mic' ? musicF.onset : 0;
     const voice = window.__flow.forceVoice ?? (paused ? voiceEnv.value : voiceEnv.update(dt, { speech: roomSpeech, onset: roomClap }));
-    programFor({ I: out.I, A: out.As, E: out.hud.E, C: out.hud.C, H: out.targets.H, L, heat: out.heat, ship: ship.mode, diving: ship.diving, jump: !!jump, calm, arcS: out.arcS, world, raw: passages.raw, voice }, depth, target);
+    programFor({ I: out.I, A: out.As, E: out.hud.E, C: out.hud.C, H: out.targets.H, L, heat: out.heat, ship: ship.mode, diving: ship.diving, jump: !!jump, calm, arcS: out.arcS, world, raw: rawNow, voice }, depth, target);
     // The arc's F axis biases the echo decay by ±0.2 around the arcs' neutral 0.3. (Its S axis has no room: Depth is
     // both the fold's floor (v2) and its ceiling (v3), so the fold is Depth's whenever the world leads.)
     target.echoDecay = Math.max(0, Math.min(1, target.echoDecay + 0.2 * Math.max(-1, Math.min(1, (out.targets.F - 0.3) / 0.7))));
@@ -582,7 +616,7 @@ function frame(dt) {
     }
     Object.assign(program, window.__flow.forceProgram);
     capProgram(program, depth);   // Depth caps gestures too
-    if (passages.raw && !jump) { program.fold = 0; program.mirror = 'none'; program.formContrast = 0; program.tunnel = 0; }   // a raw passage stays raw under gestures
+    if (rawNow && !jump) { program.fold = 0; program.mirror = 'none'; program.formContrast = 0; program.tunnel = 0; }   // a raw passage stays raw under gestures
     if (calm) { program.chromaSplit = 0; program.chromaCycle = 0; program.gain = Math.min(program.gain, 0.5); }   // calm holds against gestures, moods and the debug hook
     if (!paused) phases.advance(dt, program);   // a paused picture holds still
     // Quality drops to half after two seconds under 50 fps and returns after five good seconds.
@@ -607,7 +641,7 @@ function updateHUD(out, frames, L) {
   const sound = audio.context && audio.context.state === 'running';
   const sign = out.I >= 0 ? '+' : '';
   let line = `${out.hud.leading} ${sign}${out.I.toFixed(2)}`;
-  if (ship.mode === 'hover') line += ' · tap to launch';
+  if (ship.mode === 'hover') line += ' · ' + shots.shot.label;
   if (!sound && !audio.synthetic) line += ' · tap to start sound';
   else if (frames.music) line += ` · ${Math.round(out.hud.bpm)} BPM · C ${out.hud.C.toFixed(2)}`;
   line += ` · life ${L.toFixed(2)}` + (out.heat > 0 ? ` · heat +${out.heat.toFixed(2)}` : '') + (dissolving ? ' · REWIND' : '') + (jump ? ' · JUMP' : '') + (ship.diving ? ' · DIVE' : '') + (passages.raw && !jump ? ' · RAW' : '') + (visualGestures.active ? ' · ' + visualGestures.active.toUpperCase() : '') + (paused ? ' · PAUSED' : '');

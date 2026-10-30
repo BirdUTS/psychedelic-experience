@@ -5,7 +5,11 @@ import * as THREE from '../vendor/three.module.js';
 import { paletteHSL, paletteLUT } from './engine/palettes.mjs';
 
 const TAU = Math.PI * 2;
-const dummy = new THREE.Object3D(), color = new THREE.Color(), direction = new THREE.Vector3(), up = new THREE.Vector3(0, 1, 0);
+const dummy = new THREE.Object3D(), color = new THREE.Color(), direction = new THREE.Vector3(), up = new THREE.Vector3(0, 1, 0), normal = new THREE.Vector3();
+// A planet for Life (v3.3): a dark ocean with a lit rim, and a thin atmosphere glowing around it.
+const RIM_VERTEX = `varying vec3 vN; varying vec3 vV; void main(){ vec4 mv = modelViewMatrix * vec4(position, 1.0); vN = normalize(normalMatrix * normal); vV = normalize(-mv.xyz); gl_Position = projectionMatrix * mv; }`;
+const OCEAN_FRAGMENT = `uniform vec3 deep; uniform vec3 rim; varying vec3 vN; varying vec3 vV; void main(){ float f = pow(1.0 - max(dot(vN, vV), 0.0), 2.5); gl_FragColor = vec4(mix(deep, rim, f), 1.0); }`;
+const AIR_FRAGMENT = `uniform vec3 glow; varying vec3 vN; varying vec3 vV; void main(){ float f = pow(1.0 - abs(dot(vN, vV)), 3.0); gl_FragColor = vec4(glow * f, f); }`;
 
 export class Worlds {
   constructor(group, sims, scene) {
@@ -47,8 +51,8 @@ export class Worlds {
     dots.frustumCulled = false; this.group.add(dots); this.visual.userData.halo = dots;
   }
 
-  build(world, mode, skin = this.skin) {
-    this.clean(); this.world = world; this.mode = mode; this.skin = skin;
+  build(world, mode, skin = this.skin, layout = 'sphere') {
+    this.clean(); this.world = world; this.mode = mode; this.skin = skin; this.layout = layout;
     const s = this.sims, ship = mode === 'ship';
     s.swarm.travel = ship; s.boids.travel = ship;
     if (world === 'physarum') {
@@ -56,6 +60,11 @@ export class Worlds {
         const mat = new THREE.MeshBasicMaterial({ map: this.tunnelTexture, side: THREE.BackSide, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false });
         this.visual = new THREE.Mesh(new THREE.CylinderGeometry(6, 6, 60, 48, 1, true), mat);
         this.visual.rotation.x = Math.PI / 2; this.visual.userData.tunnel = true;
+      } else if (layout === 'dish') {   // a petri dish seen from above
+        this.visual = new THREE.Mesh(new THREE.CircleGeometry(9, 96), new THREE.MeshBasicMaterial({ map: this.texture, side: THREE.DoubleSide, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false }));
+        this.visual.rotation.x = -Math.PI / 2; this.visual.userData.dish = true;
+        const rim = new THREE.Mesh(new THREE.RingGeometry(9, 9.25, 96), new THREE.MeshBasicMaterial({ color: 0x9fd9e8, transparent: true, opacity: 0.25, side: THREE.DoubleSide }));
+        rim.rotation.x = -Math.PI / 2; this.group.add(rim);
       } else {
         this.visual = new THREE.Mesh(new THREE.SphereGeometry(8.5, 64, 40), new THREE.MeshBasicMaterial({ map: this.texture, side: THREE.DoubleSide, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false }));
         this.group.add(new THREE.Mesh(new THREE.SphereGeometry(9, 40, 24), new THREE.MeshBasicMaterial({ color: 0x5a7990, wireframe: true, transparent: true, opacity: 0.025 })));
@@ -73,6 +82,11 @@ export class Worlds {
       this.visual.instanceMatrix.setUsage(THREE.DynamicDrawUsage); this.group.add(this.visual);
     } else {
       this.visual = new THREE.InstancedMesh(new THREE.BoxGeometry(0.12, 0.12, 0.12), new THREE.MeshBasicMaterial({ color: 0xffffff }), s.life.grid.cells.length);
+      if (!ship) {   // the planet under the cells
+        const ocean = new THREE.Mesh(new THREE.SphereGeometry(6.95, 96, 64), new THREE.ShaderMaterial({ vertexShader: RIM_VERTEX, fragmentShader: OCEAN_FRAGMENT, uniforms: { deep: { value: new THREE.Color(0x030a18) }, rim: { value: new THREE.Color(0x2f7fc4) } } }));
+        const air = new THREE.Mesh(new THREE.SphereGeometry(7.9, 64, 48), new THREE.ShaderMaterial({ vertexShader: RIM_VERTEX, fragmentShader: AIR_FRAGMENT, uniforms: { glow: { value: new THREE.Color(0x6cc7ff) } }, side: THREE.BackSide, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false }));
+        this.group.add(ocean, air); this.visual.userData.planet = true;
+      }
       this.visual.instanceMatrix.setUsage(THREE.DynamicDrawUsage); this.group.add(this.visual);
     }
     this.visual.frustumCulled = false;
@@ -124,6 +138,7 @@ export class Worlds {
       }
       this.ctx.putImageData(this.pixels, 0, 0);
       if (visual.userData.tunnel) { this.tunnelTexture.needsUpdate = true; visual.scale.set(0.96 + 0.04 * scale, 1, 0.96 + 0.04 * scale); visual.rotation.y += 0.0005; }
+      else if (visual.userData.dish) { this.texture.needsUpdate = true; visual.rotation.z = simTime * 0.01; visual.scale.setScalar(0.98 + 0.02 * scale); }
       else { this.texture.needsUpdate = true; visual.rotation.y = simTime * 0.025; visual.scale.setScalar(0.96 + 0.04 * scale); }
     } else if (this.world === 'swarm') {
       const sw = s.swarm, p = sw.p, lines = visual.userData.trail.geometry.attributes.position;
@@ -153,10 +168,13 @@ export class Worlds {
           const a = ix / n * TAU, z = ((iy / n * 60 + this.lifeScroll) % 60 + 60) % 60 - 54;   // tunnel from z −54 to +6 around the viewer
           dummy.position.set(6 * Math.cos(a), 6 * Math.sin(a), z);
         } else {
-          const a = ix / n * TAU, bb = (iy + 0.5) / n * Math.PI, r = 7 + Math.min(age[i], 40) * 0.012;
+          // Cells as lights on the planet: latitude kept off the poles so the grid does not pile up there.
+          const a = ix / n * TAU + simTime * 0.01, bb = 0.25 + (iy + 0.5) / n * (Math.PI - 0.5), r = 7 + Math.min(age[i], 40) * 0.01;
           dummy.position.set(r * Math.sin(bb) * Math.cos(a), r * Math.cos(bb), r * Math.sin(bb) * Math.sin(a));
         }
-        dummy.quaternion.identity(); dummy.scale.setScalar((0.6 + 0.6 * life.density) * scale * (tunnel ? 1.6 : 1)); dummy.updateMatrix();
+        if (tunnel) dummy.quaternion.identity(); else dummy.quaternion.setFromUnitVectors(up, normal.copy(dummy.position).normalize());
+        if (tunnel) dummy.scale.setScalar((0.6 + 0.6 * life.density) * scale * 1.6); else dummy.scale.set(2.2 * scale, 0.5 + Math.min(age[i], 30) * 0.08, 2.2 * scale);   // flat tiles that grow into towers with age
+        dummy.updateMatrix();
         visual.setMatrixAt(count, dummy.matrix); visual.setColorAt(count++, this.paletteColor(palette, hue, sat, Math.min(age[i], 60) / 60, 0.65));
       }
       visual.count = count; visual.instanceMatrix.needsUpdate = true; if (visual.instanceColor) visual.instanceColor.needsUpdate = true;
