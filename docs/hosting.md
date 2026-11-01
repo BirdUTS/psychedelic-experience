@@ -48,6 +48,16 @@ and `Strict-Transport-Security` behind HTTPS.
 To rotate the invite: Environment → `FLOW_INVITE` → Generate → save. Every cookie stops working at once; send the new
 link. To take the site down: suspend the service in Render; the GitHub Pages mirror keeps working without JEV.
 
+## Done on 2026-11-01
+
+Live: `https://flow.birdview.hk/` answers the 403 invite page with `nosniff`, `no-referrer` and HSTS from
+`SimpleHTTP/0.6 Python/3.14.8` on Render; certificate issued by Google Trust Services (valid to 2027-01-30);
+`https://flow-with-mind.onrender.com/` answers the same. Service `flow-with-mind` (srv-dbjhehu7bikc73ffgfb0), free plan,
+Blueprint synced from `main`. The Hobby workspace includes two custom domains and `story.birdview.hk` and
+`kuji.birdview.hk` held both, so `kuji.birdview.hk` was removed from the `kuji` service (which stays reachable at
+`kuji-vn4l.onrender.com`; its Wix CNAME was left in place). Adding it back, or moving to Starter, needs a card on the
+Render account.
+
 ## Checks
 
 `python3 -m unittest scripts/test_serve_worlds.py` covers the gate, the host check, the cookie flags and the
