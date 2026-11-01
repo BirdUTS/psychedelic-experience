@@ -213,7 +213,7 @@ function act(action) {
   touch();
   switch (action.type) {
     case 'tap':
-      if (QUIET) { if (!started) break; nextShot(); director.agency.gesture(2); attractor = { x: action.x / innerWidth, y: action.y / innerHeight }; attractorUntil = simClock + 0.6; break; }
+      if (QUIET) { if (!started) break; if (!talking || (soundSource === 'mic' && !audio.micOn)) openEar(); nextShot(); director.agency.gesture(2); attractor = { x: action.x / innerWidth, y: action.y / innerHeight }; attractorUntil = simClock + 0.6; break; }
       if (ship.mode === 'hover') { setShipMode('ship'); $('decision').textContent = 'Launched. Tap again to pulse; long-press the ring to hover.'; }
       else { director.agency.gesture(2); attractor = { x: action.x / innerWidth, y: action.y / innerHeight }; attractorUntil = simClock + 0.6; }
       break;
@@ -343,11 +343,22 @@ function begin() {
   if (started) return;
   started = true; $('start').classList.add('gone'); document.body.classList.add('immersed'); touch();
   audio.resume();
-  caption(captionLine('hint', capLang), 5); hintAt = simClock + 90;
-  // Nothing waits on a prompt: the microphone may sit unanswered, fullscreen may be refused (an embedded page).
-  if (soundSource === 'mic') audio.startMic().then(ok => { micLabel(); if (!ok) caption(captionLine('noMic', capLang), 4); });
-  if (Recognition) setTalk(true);
+  openEar();   // the words to say come only once the ear is really open (setTalk)
+  // Fullscreen may be refused (an embedded page); nothing waits on it.
   if (!document.fullscreenElement) { try { document.documentElement.requestFullscreen({ navigationUI: 'hide' })?.catch?.(() => {}); } catch { /* no fullscreen here */ } }
+}
+// The ear opens in order: the room mic first (one permission prompt), Talk once that is granted — asking Chrome for
+// both at once leaves Talk refused. While the ear is shut, every tap asks again and the glass says so now and then.
+let earOpening = false, noMicSaid = -Infinity;
+async function openEar() {
+  if (earOpening) return;
+  earOpening = true;
+  try {
+    const ok = soundSource !== 'mic' || audio.micOn || await audio.startMic();
+    micLabel();
+    if (!ok) { if (simClock - noMicSaid > 30) { noMicSaid = simClock; caption(captionLine('noMic', capLang), 4); } return; }
+    if (Recognition && !talking) setTalk(true);
+  } finally { earOpening = false; }
 }
 $('start').addEventListener('pointerup', e => { e.preventDefault(); begin(); });
 $('start').addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); begin(); } });
@@ -368,7 +379,7 @@ function stepCaptions() {
 }
 const HINTS = ['hintHold', 'hintWorld', 'hintCalm'];
 function stepHints() {
-  if (!QUIET || !started || simClock < hintAt) return;
+  if (!QUIET || !started || !talking || simClock < hintAt) return;
   if (simClock - lastInteraction > 60 && simClock - lastSpoken > 60) caption(captionLine(HINTS[hintIndex++ % HINTS.length], capLang), 4);
   hintAt = simClock + 240;
 }
@@ -584,7 +595,9 @@ else $('listen').onclick = () => setTalk(!talking);
 let talking = false;
 function setTalk(on) {
   talking = on; $('listen').textContent = 'Talk: ' + (on ? 'on' : 'off'); $('listen').setAttribute('aria-pressed', String(on));
+  document.body.classList.toggle('listening', on);
   if (!on) { recognition?.stop(); recognition = null; $('decision').textContent = 'Talk off.'; return; }
+  caption(captionLine('listening', capLang), 2); caption(captionLine('hint', capLang), 5); hintAt = simClock + 90;   // now it is true
   $('decision').textContent = 'Talk on · speak freely. Chrome sends your speech to Google to turn it into words while Talk is on.' + (jev.enabled ? '' : ' Turn JEV on for free-form requests.');
   startRecognition();
 }
@@ -592,7 +605,7 @@ function startRecognition() {
   if (!talking) return;
   const r = recognition = new Recognition(); r.lang = $('talkLang').value; r.continuous = true; r.interimResults = false;
   r.onresult = e => { for (let i = e.resultIndex; i < e.results.length; i++) if (e.results[i].isFinal) { const text = e.results[i][0].transcript.trim(); if (text) { hearText(text); decide(text); } } };
-  r.onerror = e => { if (e.error === 'not-allowed' || e.error === 'service-not-allowed') { setTalk(false); $('decision').textContent = 'Talk needs microphone permission (and Chrome online). Type the request instead.'; } };
+  r.onerror = e => { if (e.error === 'not-allowed' || e.error === 'service-not-allowed' || e.error === 'audio-capture') { setTalk(false); $('decision').textContent = 'Talk needs microphone permission (and Chrome online). Type the request instead.'; if (simClock - noMicSaid > 30) { noMicSaid = simClock; caption(captionLine('noMic', capLang), 4); } } };
   r.onend = () => { if (talking && recognition === r) setTimeout(startRecognition, 300); };   // Chrome stops after a silence: listen again
   try { r.start(); } catch { /* already started */ }
 }

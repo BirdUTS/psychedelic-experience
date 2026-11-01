@@ -64,3 +64,4 @@ body:not(.quiet) #start,body:not(.quiet) #hostCorner{display:none}
 #hostClose{position:absolute;top:14px;right:14px;width:34px;height:34px;padding:0;font-size:20px;line-height:1}
 #hostHint{color:var(--muted);font-size:11px;margin-top:26px;line-height:1.6}
 @media(prefers-reduced-motion:reduce){#startLine{animation:none}}
+#ear{position:fixed;right:26px;bottom:26px;width:9px;height:9px;border-radius:50%;background:var(--mint);opacity:0;transition:opacity .8s;pointer-events:none;z-index:4}body.quiet.listening #ear{opacity:.5;animation:breathe 3s ease-in-out infinite}
