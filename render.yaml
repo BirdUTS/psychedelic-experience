@@ -7,8 +7,9 @@ services:
     name: flow-with-mind
     runtime: python
     # free sleeps after 15 min idle and wakes in 20–60 s (22 s measured on story.birdview.hk); starter stays warm,
-    # which matters when the first person to open the link is already mid-trip. Change in the dashboard any time.
-    plan: starter
+    # which matters when the first person to open the link is already mid-trip. Starter needs a card on the Render
+    # account; until one is added this stays free (2026-11-01). Change the line and push: the Blueprint syncs it.
+    plan: free
     buildCommand: 'echo "stdlib only, nothing to install"'
     startCommand: python scripts/serve_worlds.py --bind 0.0.0.0
     autoDeploy: true

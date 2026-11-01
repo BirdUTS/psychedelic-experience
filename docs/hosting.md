@@ -34,7 +34,8 @@ and `Strict-Transport-Security` behind HTTPS.
 1. Merge this change into `main` (the Blueprint is read from the default branch).
 2. Render dashboard → **New → Blueprint** → connect GitHub if asked → pick `BirdUTS/psychedelic-experience`.
    Render shows the service from `render.yaml` and asks for `TYPESAFE_API_KEY`: paste the TypeSafe key. Apply.
-   The plan is `starter` (always warm); switch to `free` in the service's settings if the 20–60 s wake-up is acceptable.
+   The plan is `free` for now (sleeps after 15 min idle, wakes in 20–60 s). Once a card is on the Render account,
+   change `plan: free` to `plan: starter` in `render.yaml` and push; the Blueprint syncs it and the service stays warm.
 3. When the first deploy is live, open the service → **Settings → Custom Domains → Add** `flow.birdview.hk`.
    Render shows the CNAME target (`flow-with-mind.onrender.com`; if Render had to suffix the name, use what it shows
    and add that hostname to `ALLOWED_HOSTS` in Environment).
