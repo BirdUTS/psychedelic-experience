@@ -1,5 +1,5 @@
 import {test} from 'node:test'; import assert from 'node:assert/strict';
-import {buildState, validateDecision, JevClient, REQUEST_ACTIONS} from '../immersive/engine/jev-client.mjs';
+import {buildState, validateDecision, JevClient, REQUEST_ACTIONS, shouldAutoEnable} from '../immersive/engine/jev-client.mjs';
 import {MOODS} from '../immersive/engine/grammar.mjs';
 const good=()=>({version:4,hold:.7,scene:{choice:'boids',p:.62},energy:.75,entropy:.5,symmetry:6,palette:'ember',initiative:'lead',request:'slower',confidence:{scene:.62,energy:.8,entropy:.3,symmetry:.9,palette:.7,initiative:.5,request:.9}});
 const ctx={sentVersion:4,sentAt:100,now:103};
@@ -12,3 +12,4 @@ test('a bumped version invalidates an in-flight answer',async()=>{let resolve;co
 test('request vocabulary is the spec list',()=>{assert.equal(REQUEST_ACTIONS.length,11);assert(REQUEST_ACTIONS.includes('surround'))});
 test('mood is validated against MOODS and dropped below the floor',()=>{const c=good().confidence;const d=validateDecision({...good(),mood:'melt',confidence:{...c,mood:.8}},ctx);assert.equal(d.mood,'melt');const low=validateDecision({...good(),mood:'melt',confidence:{...c,mood:.2}},ctx);assert.equal(low.mood,undefined);assert.equal(validateDecision({...good(),mood:'angry',confidence:{...c,mood:.9}},ctx),null);assert.deepEqual(MOODS,['clear','dream','melt','electric','holy'])});
 test('view is validated against the shot names and dropped below the floor',()=>{const c=good().confidence;assert.equal(validateDecision({...good(),view:'satellite',confidence:{...c,view:.8}},ctx).view,'satellite');assert.equal(validateDecision({...good(),view:'satellite',confidence:{...c,view:.2}},ctx).view,undefined);assert.equal(validateDecision({...good(),view:'helicopter',confidence:{...c,view:.9}},ctx),null)});
+test('JEV starts on by itself only when served over HTTPS and the decision server answers an empty POST with 400',()=>{assert.equal(shouldAutoEnable({protocol:'https:',probeStatus:400}),true);assert.equal(shouldAutoEnable({protocol:'http:',probeStatus:400}),false,'local stays off');assert.equal(shouldAutoEnable({protocol:'https:',probeStatus:405}),false,'GitHub Pages has no server');assert.equal(shouldAutoEnable({protocol:'https:',probeStatus:403}),false,'not past the gate');assert.equal(shouldAutoEnable({protocol:'https:',probeStatus:null}),false,'probe failed')});

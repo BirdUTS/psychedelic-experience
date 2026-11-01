@@ -13,6 +13,14 @@ services:
     buildCommand: 'echo "stdlib only, nothing to install"'
     startCommand: python scripts/serve_worlds.py --bind 0.0.0.0
     autoDeploy: true
+    # A deploy takes the free instance down for a minute or two, so pushes that only touch notes or tests skip it.
+    buildFilter:
+      ignoredPaths:
+        - docs/**
+        - tests/**
+        - "**/*.md"
+        - scripts/test_*.py
+        - .claude/**
     envVars:
       - key: ALLOWED_HOSTS
         value: flow.birdview.hk

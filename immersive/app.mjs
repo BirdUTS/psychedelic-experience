@@ -17,7 +17,7 @@ import { Phases } from './engine/phases.mjs';
 import { Passages } from './engine/passages.mjs';
 import { ShotDirector, shotPose, shotForWords, SHOTS } from './engine/shots.mjs';
 import { VisualGestures } from './engine/visual-gestures.mjs';
-import { JevClient, buildState } from './engine/jev-client.mjs';
+import { JevClient, buildState, shouldAutoEnable } from './engine/jev-client.mjs';
 import { directorInput } from './engine/streams.mjs';
 import { requestActions, spokenMood } from './engine/requests.mjs';
 import { VoiceEnvelope } from './engine/voice.mjs';
@@ -436,7 +436,7 @@ async function askJev(text = '', force = false) {
   lastJevAsk = simClock;
   const decision = await jev.maybeRequest(() => jevState(text), { force });
   if (!decision) {
-    if (jev.lastError) { jevStatus = 'offline'; $('decision').textContent = `JEV unavailable (${jev.lastError}); local rules continue. JEV needs the local server: run scripts/start-flow.sh (or double-click start-flow.command).`; }
+    if (jev.lastError) { jevStatus = 'offline'; $('decision').textContent = `JEV unavailable (${jev.lastError}); local rules continue. ${location.protocol === 'https:' ? 'JEV tries again shortly.' : 'JEV needs the local server: run scripts/start-flow.sh (or double-click start-flow.command).'}`; }
     return;
   }
   jevStatus = 'ok';
@@ -463,6 +463,8 @@ async function askJev(text = '', force = false) {
   $('decision').textContent = line;
 }
 $('jev').onclick = () => { jev.enabled = !jev.enabled; jevStatus = jev.enabled ? 'connecting' : 'off'; jev.bump(); if (!jev.enabled) director.clearMood(); $('jev').textContent = 'JEV: ' + (jev.enabled ? 'on' : 'off'); $('jev').setAttribute('aria-pressed', String(jev.enabled)); if (jev.enabled) askJev('', true); else $('decision').textContent = 'Local director running.'; };
+// Hosted: a guest never has to find the switch. The probe is the empty POST start-flow.sh also uses to recognise the server.
+if (location.protocol === 'https:') fetch('/api/decide', { method: 'POST' }).then(r => r.status, () => null).then(status => { if (shouldAutoEnable({ protocol: location.protocol, probeStatus: status }) && !jev.enabled) $('jev').onclick(); });
 function decide(text = '') {
   // A short command is handled here; a longer sentence also goes to JEV (when on), so a stray word like 慢 inside it
   // does not swallow the rest of what you said.

@@ -15,6 +15,14 @@ stdlib Python server, secrets typed in the Render dashboard, one CNAME in the Wi
 | Static mirror without JEV | GitHub Pages, `https://birduts.github.io/psychedelic-experience/immersive/` | unchanged; shows `JEV OFFLINE` |
 | Local run | `start-flow.command` or `scripts/start-flow.sh` | loopback, no gate, key from the AI Lab `.env` |
 
+## JEV starts on when hosted
+
+On an HTTPS page the app sends one empty `POST /api/decide` at load; the hosted server answers 400 (GitHub Pages
+405, outside the gate 403, no server at all nothing), and only the 400 switches JEV on by itself, so a guest never
+has to find the switch in the drawer. Locally (http) the switch stays off as before. Pushes that touch only `docs/`,
+`tests/` or Markdown do not redeploy (`buildFilter` in `render.yaml`), because each deploy takes the free instance
+down for a minute or two.
+
 ## The gate
 
 `FLOW_INVITE` set → every request needs either `?k=<token>` on the URL or the cookie that the first such visit plants.

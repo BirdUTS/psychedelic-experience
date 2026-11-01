@@ -1,5 +1,13 @@
 # Flow with Mind — how to start, what to try, what was tested
 
+## v3.6 (2026-11-01): JEV on by itself when hosted
+
+Bird, on `flow.birdview.hk`: "JEV OFFLINE" — then "how do I even tell online from offline?" The switch was off: every reload starts with the JEV toggle off and the HUD ending in `LOCAL`, which reads as a failure to anyone who did not build it. Now an HTTPS page probes `/api/decide` once with an empty POST and, when the hosted server answers 400 (`shouldAutoEnable` in `jev-client.mjs`), flips the switch itself; the HUD goes `JEV…` → `JEV` with nothing touched. GitHub Pages (405) and local http stay off. The drawer's failure line no longer tells a guest to run `start-flow.sh` when hosted. Cache `extra-worlds-v15`. Separately, Render's log showed every `/api/decide` answering 200 all evening, and a docs-only push had redeployed the free instance at 10:01 pm (a minute or two dark, then the client's backoff of up to four minutes); `render.yaml` now ignores docs, tests and Markdown.
+
+Tested by machine: `node --test tests/*.test.mjs tests/*.test.cjs` → 167 tests (new: the auto-enable rule over https/http × 400/405/403/none). Tested live from the shell as a fresh guest: invite link → 302 with the cookie → `/immersive/` 200 → `POST /api/decide` 200 in 0.54 s with a real decision → the empty probe answers 400. **Not yet tested:** the browser flipping the switch on its own on the deployed page (next deploy).
+
+---
+
 ## Hosting (2026-11-01): the same server on Render at flow.birdview.hk
 
 Bird: "I want it on birdview.hk, like Story Stage." Stage 1 of the v4 plan: the app does not change; `scripts/serve_worlds.py` gains the hosted mode Story Stage uses. `--bind 0.0.0.0` refuses to start without `ALLOWED_HOSTS` and `FLOW_INVITE`; the whole site then opens only from the invite link (`?k=TOKEN`), which plants an HttpOnly, SameSite=Lax, Secure cookie (an HMAC of the token, one year) and redirects to the clean URL; anything else answers a one-line 403 page, `/api/decide` a 403 JSON. `Host` is checked against `ALLOWED_HOSTS` plus Render's own hostname; every response carries `nosniff`, `no-referrer` and, behind HTTPS, HSTS; `/` redirects to `/immersive/`. New: `render.yaml` (starter plan so the link never wakes a sleeping service mid-trip, a generated `FLOW_INVITE`, the TypeSafe key typed in the dashboard) and `docs/hosting.md` (the Render and Wix steps). Locally nothing changes: loopback, no gate, key from the AI Lab `.env`.
