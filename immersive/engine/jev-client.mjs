@@ -10,8 +10,8 @@ export const INITIATIVES = ['follow', 'mutual', 'lead'];
 /* Whether JEV starts switched on without anyone opening the drawer: only on a hosted (HTTPS) page with the decision
    server behind it. An empty POST to /api/decide answers 400 there, 405 on GitHub Pages, 403 outside the invite gate,
    and nothing when there is no server. Local http keeps the switch off, as before. */
-export function shouldAutoEnable({ protocol, probeStatus } = {}) {
-  return protocol === 'https:' && probeStatus === 400;
+export function shouldAutoEnable({ protocol, probeStatus, quiet = false } = {}) {
+  return probeStatus === 400 && (protocol === 'https:' || quiet);   // the quiet glass has no switch, so a local server counts too
 }
 const STATE_KEYS = ['scene', 'sceneAge', 'arc', 'features', 'initiative', 'locks', 'userText', 'recentDecisions', 'online'];
 const round2 = x => Number.isFinite(x) ? Math.round(x * 100 + 1e-9) / 100 : 0;

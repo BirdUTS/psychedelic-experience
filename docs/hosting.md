@@ -23,6 +23,11 @@ has to find the switch in the drawer. Locally (http) the switch stays off as bef
 `tests/` or Markdown do not redeploy (`buildFilter` in `render.yaml`), because each deploy takes the free instance
 down for a minute or two.
 
+## What a guest sees
+
+Since v3.7 the page is the quiet glass: one line to begin, captions, no buttons. The dashboard is at
+`https://flow.birdview.hk/immersive/?dev` for checking the engine (same cookie). Notes in `docs/flow-with-mind-playtest.md`.
+
 ## The gate
 
 `FLOW_INVITE` set → every request needs either `?k=<token>` on the URL or the cookie that the first such visit plants.

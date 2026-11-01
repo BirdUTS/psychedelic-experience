@@ -1,5 +1,18 @@
-<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="theme-color" content="#05070c"><title>EXTRA / Living Worlds · Flow</title><link rel="stylesheet" href="style.css"></head><body>
+<!doctype html><html lang="zh-Hant"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="theme-color" content="#05070c"><title>EXTRA / Living Worlds · Flow</title><link rel="stylesheet" href="style.css"></head><body>
 <main id="stage" aria-label="Emergent worlds you travel through"></main>
+<!-- Quiet glass (v4 step 1): one line to begin, one caption layer, a host panel reached by Esc or a two-second corner hold.
+     The dashboard below stays for ?dev only. -->
+<div id="start" role="button" tabindex="0" aria-label="Begin"><p id="startLine">輕觸開始</p></div>
+<div id="caption" aria-live="polite"></div>
+<div id="hostCorner" aria-hidden="true"></div>
+<aside id="host" hidden aria-label="Host">
+<button id="hostClose" aria-label="Close">×</button>
+<div class="hrow"><span data-line="hostSound">聲音來源</span><div class="seg"><button data-sound="mic" aria-pressed="true" data-line="soundMic">房間麥克風</button><button data-sound="computer" aria-pressed="false" data-line="soundComputer">電腦音樂</button><button data-sound="demo" aria-pressed="false" data-line="soundDemo">示範音樂</button></div></div>
+<div class="hrow"><span data-line="hostCaptions">字幕</span><div class="seg"><button data-captions="all" aria-pressed="true" data-line="capAll">全部</button><button data-captions="ground" aria-pressed="false" data-line="capGround">只在帶我回來</button><button data-captions="none" aria-pressed="false" data-line="capNone">無</button></div></div>
+<div class="hrow"><span data-line="hostComfort">舒適</span><div class="seg"><button data-comfort="off" aria-pressed="true" data-line="comfortOff">正常</button><button data-comfort="on" aria-pressed="false" data-line="comfortOn">柔和</button></div></div>
+<div class="hrow"><span data-line="hostLanguage">語言</span><div class="seg"><button data-lang="yue-Hant-HK" aria-pressed="false" data-line="langYue">廣東話</button><button data-lang="en-AU" aria-pressed="false" data-line="langEn">English</button><button data-lang="cmn-Hans-CN" aria-pressed="false" data-line="langCmn">普通話</button></div></div>
+<p id="hostHint" data-line="hostHint">Esc 或按住右下角兩秒可再打開。</p>
+</aside>
 <header class="fades"><a href="../extra-math-lab.html" title="Original math lab">E X T R A</a><span>LIVING WORLDS / 004 · FLOW WITH MIND</span><div id="network">LOCAL ENGINE</div></header>
 <section class="intro fades"><div class="micro" id="chapter">01 / MYCELIAL INTELLIGENCE</div><h1 id="worldTitle">The world<br>weaves itself.</h1><p id="worldHint">Every path remembers another path.</p></section>
 <!-- The play surface: one ring, a HUD line, a gear. Everything else lives in the drawer. -->

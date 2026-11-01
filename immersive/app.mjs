@@ -27,8 +27,14 @@ import { Ship } from './engine/ship.mjs';
 import { depthToAxes } from './engine/depth.mjs';
 import { Gestures } from './engine/gestures.mjs';
 import { Worlds } from './worlds.mjs';
+import { talkLanguage, captionLanguage, line as captionLine, worldName, decisionCaption } from './engine/captions.mjs';
 
 const $ = id => document.getElementById(id), RAD = Math.PI / 180;
+// The quiet glass (v4 step 1): a guest sees the picture, one line to begin, and captions; nothing to set. ?dev keeps
+// the old dashboard, the ring, the HUD and the keyboard for checking the engine.
+const PARAMS = new URLSearchParams(location.search), DEV = PARAMS.has('dev'), QUIET = !DEV;
+document.body.classList.toggle('quiet', QUIET);
+let capLang = captionLanguage(navigator.language), captionsMode = 'all', grounded = false, started = !QUIET, soundSource = 'mic', lastSpoken = -Infinity, hintAt = Infinity, hintIndex = 0;
 const WORLDS = {
   physarum: ['01 / MYCELIAL INTELLIGENCE', 'The world<br>weaves itself.', 'Every path remembers another path. The network chases the food the music drops.', 'sense trail → turn → deposit → diffuse and decay · food jumps on accents'],
   swarm: ['02 / COLLECTIVE RESONANCE', 'A thousand lights.<br>One becoming.', 'Each light keeps its own rhythm, until it does not.', 'position ↔ phase coupling · active phase wave ↔ rings by entropy · kicks on the beat'],
@@ -67,7 +73,7 @@ const director = new Director({ scene: world });
 const ship = new Ship();
 const liveliness = new Liveliness();
 const rings = Object.fromEntries(Object.entries(sims).map(([k, s]) => [k, new SnapshotRing(s.state())]));
-const gestures = new Gestures();
+const gestures = new Gestures(QUIET ? { longPressMs: 1000 } : {});
 const jev = new JevClient({ now: () => performance.now() / 1000 });
 const bump = () => { jev.bump(); };
 let musicF = null, roomF = null;
@@ -93,11 +99,13 @@ window.__flow = {
   get jump() { return jump; }, get world() { return world; }, get dissolving() { return dissolving; },
   frame: dt => frame(dt), advance(seconds, dt = 1 / 60) { for (let t = 0; t < seconds; t += dt) frame(dt); return seconds; },
   rewind: () => rewind('manual'), launch: () => setShipMode('ship'), hover: () => setShipMode('hover'),
+  begin: () => begin(), ground: on => setGround(on), caption: (t, s) => caption(t, s), get grounded() { return grounded; }, get started() { return started; },
 };
 
 // ---------- worlds, scenes, snapshots ----------
-function choose(id, { auto = false, keepMood = false } = {}) {
+function choose(id, { auto = false, keepMood = false, say = false } = {}) {
   if (!WORLDS[id]) return;
+  if (say) caption(worldName(id, capLang), 3);
   world = id; shots.update({ world: id }); worlds.build(id, ship.mode, $('skin').value, shots.shot.layout || 'sphere'); startShot();
   const a = WORLDS[id];
   $('chapter').textContent = a[0]; $('worldTitle').innerHTML = a[1]; $('worldHint').textContent = a[2]; $('rule').textContent = a[3];
@@ -133,7 +141,7 @@ function startJump(next, { manual = false } = {}) {
 }
 function updateJump(dt) {
   jump.t += dt;
-  if (!jump.switched && jump.t >= 2) { jump.switched = true; choose(jump.to, { auto: true, keepMood: jump.manual }); }
+  if (!jump.switched && jump.t >= 2) { jump.switched = true; choose(jump.to, { auto: true, keepMood: jump.manual, say: !jump.manual }); }
   const u = jump.t < 2 ? jump.t / 2 : (jump.t - 2) / 2;
   group.scale.set(1, 1, jump.t < 2 ? 1 - 0.9 * u : 0.6 + 0.4 * Math.min(1, u));
   if (jump.t >= 4 || (jump.switched && world !== jump.to)) {   // never leave a jump hanging
@@ -205,19 +213,21 @@ function act(action) {
   touch();
   switch (action.type) {
     case 'tap':
+      if (QUIET) { if (!started) break; nextShot(); director.agency.gesture(2); attractor = { x: action.x / innerWidth, y: action.y / innerHeight }; attractorUntil = simClock + 0.6; break; }
       if (ship.mode === 'hover') { setShipMode('ship'); $('decision').textContent = 'Launched. Tap again to pulse; long-press the ring to hover.'; }
       else { director.agency.gesture(2); attractor = { x: action.x / innerWidth, y: action.y / innerHeight }; attractorUntil = simClock + 0.6; }
       break;
     case 'swipe': {
+      if (QUIET) break;
       if (action.dir === 'left' || action.dir === 'right') {
         const i = SCENES.indexOf(world), next = SCENES[(i + (action.dir === 'left' ? 1 : SCENES.length - 1)) % SCENES.length];
         director.requestScene(next); $('decision').textContent = `requested: ${next}` + (director.initiative.I > -0.5 ? ' · at the next phrase' : '');
       } else setDepth(depth + (action.dir === 'up' ? 0.1 : -0.1));
       break;
     }
-    case 'longpress': toggleLock(); break;
-    case 'twofinger': rewind('gesture'); break;
-    case 'pinch': ship.trim((action.scale - 1) * 0.05); break;
+    case 'longpress': if (QUIET) setGround(!grounded); else toggleLock(); break;
+    case 'twofinger': if (!QUIET) rewind('gesture'); break;
+    case 'pinch': if (!QUIET) ship.trim((action.scale - 1) * 0.05); break;
   }
 }
 canvas.addEventListener('pointerdown', e => {
@@ -251,6 +261,7 @@ addEventListener('devicemotion', e => {
 });
 addEventListener('keydown', e => {
   if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT' || e.target.tagName === 'TEXTAREA') return;
+  if (QUIET) { if (e.key === 'Escape' && !document.fullscreenElement) openHost(); return; }
   touch();
   switch (e.key) {
     case ' ': e.preventDefault(); act({ type: 'tap', x: innerWidth / 2, y: innerHeight / 2 }); break;
@@ -269,6 +280,7 @@ addEventListener('pointerdown', wake); addEventListener('keydown', wake);
 
 // ---------- drawer and setup controls ----------
 function toggleDrawer(force) {
+  if (QUIET) { openHost(force); return; }
   const open = force ?? $('drawer').hidden;
   $('drawer').hidden = !open; touch();
 }
@@ -323,6 +335,82 @@ document.addEventListener('fullscreenchange', () => {
 $('calm').onchange = () => { calm = $('calm').checked; bump(); touch(); };
 $('explainToggle').onclick = () => { const on = $('explain').hidden; $('explain').hidden = !on; $('explainToggle').setAttribute('aria-pressed', String(on)); };
 addEventListener('resize', () => { camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); renderer.setSize(innerWidth, innerHeight); renderer.getDrawingBufferSize(drawSize); post.setSize(drawSize.x, drawSize.y); });
+
+// ---------- the quiet glass: begin, captions, bring me back, host panel ----------
+// One touch starts everything the browser needs a gesture for: fullscreen, sound, the ear (room mic + speech), and
+// the first caption. JEV switched itself on at load when a decision server answered the probe.
+function begin() {
+  if (started) return;
+  started = true; $('start').classList.add('gone'); document.body.classList.add('immersed'); touch();
+  audio.resume();
+  caption(captionLine('hint', capLang), 5); hintAt = simClock + 90;
+  // Nothing waits on a prompt: the microphone may sit unanswered, fullscreen may be refused (an embedded page).
+  if (soundSource === 'mic') audio.startMic().then(ok => { micLabel(); if (!ok) caption(captionLine('noMic', capLang), 4); });
+  if (Recognition) setTalk(true);
+  if (!document.fullscreenElement) { try { document.documentElement.requestFullscreen({ navigationUI: 'hide' })?.catch?.(() => {}); } catch { /* no fullscreen here */ } }
+}
+$('start').addEventListener('pointerup', e => { e.preventDefault(); begin(); });
+$('start').addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); begin(); } });
+// Captions: the only words on the glass. Short, one at a time, a few seconds each; "bring me back" jumps the queue.
+const capQueue = []; let capUntil = -Infinity, capShowing = false;
+function caption(text, seconds = 3, { essential = false } = {}) {
+  if (!QUIET || !started || !text) return;
+  if (captionsMode === 'none' || (captionsMode === 'ground' && !essential)) return;
+  if (essential) { capQueue.length = 0; capUntil = -Infinity; }
+  if (capQueue.length >= 3) capQueue.shift();
+  capQueue.push({ text, seconds });
+}
+function stepCaptions() {
+  if (simClock < capUntil) return;
+  const next = capQueue.shift();
+  if (!next) { if (capShowing) { capShowing = false; $('caption').classList.remove('show'); } return; }
+  capShowing = true; $('caption').textContent = next.text; $('caption').classList.add('show'); capUntil = simClock + next.seconds;
+}
+const HINTS = ['hintHold', 'hintWorld', 'hintCalm'];
+function stepHints() {
+  if (!QUIET || !started || simClock < hintAt) return;
+  if (simClock - lastInteraction > 60 && simClock - lastSpoken > 60) caption(captionLine(HINTS[hintIndex++ % HINTS.length], capLang), 4);
+  hintAt = simClock + 240;
+}
+// Bring me back: hover, shallow, gentle, held on this world, clear. Never lifted by the app; a second hold or 繼續 lifts it.
+let groundSaved = null;
+function setGround(on) {
+  if (on === grounded) { if (on) caption(captionLine('ground', capLang), 4, { essential: true }); return; }
+  grounded = on;
+  if (on) {
+    groundSaved = { depth, calm, sceneLocked };
+    setShipMode('hover'); setDepth(0.15); calm = true; $('calm').checked = true; toggleLock(true); director.setMood('clear');
+    caption(captionLine('ground', capLang), 6, { essential: true });
+  } else {
+    const g = groundSaved || {}; setDepth(g.depth ?? 0.5); calm = !!g.calm; $('calm').checked = calm; toggleLock(!!g.sceneLocked); director.clearMood();
+    caption(captionLine('groundOff', capLang), 3, { essential: true });
+  }
+  bump();
+}
+// The host panel: four rows, reached by Esc or a two-second hold in the bottom-right corner.
+function openHost(on) { const open = on ?? $('host').hidden; $('host').hidden = !open; touch(); }
+$('hostClose').onclick = () => openHost(false);
+let cornerTimer = null;
+$('hostCorner').addEventListener('pointerdown', () => { clearTimeout(cornerTimer); cornerTimer = setTimeout(() => openHost(true), 2000); });
+for (const ev of ['pointerup', 'pointercancel', 'pointerleave']) $('hostCorner').addEventListener(ev, () => clearTimeout(cornerTimer));
+function pressSeg(attr, value) { document.querySelectorAll(`[${attr}]`).forEach(b => b.setAttribute('aria-pressed', String(b.getAttribute(attr) === value))); }
+document.querySelectorAll('[data-sound]').forEach(b => b.onclick = () => setSoundSource(b.dataset.sound));
+document.querySelectorAll('[data-captions]').forEach(b => b.onclick = () => { captionsMode = b.dataset.captions; pressSeg('data-captions', captionsMode); });
+document.querySelectorAll('[data-comfort]').forEach(b => b.onclick = () => { calm = b.dataset.comfort === 'on'; $('calm').checked = calm; pressSeg('data-comfort', b.dataset.comfort); bump(); });
+document.querySelectorAll('[data-lang]').forEach(b => b.onclick = () => setLanguage(b.dataset.lang));
+async function setSoundSource(src) {
+  soundSource = src; pressSeg('data-sound', src);
+  if (src === 'mic') { audio.stopSystem(); systemLabel(); player.pause(); if (!audio.micOn) { await audio.startMic(); micLabel(); } }
+  else if (src === 'computer') { const r = await audio.startSystem(); systemLabel(); if (r.ok) player.pause(); else { soundSource = 'mic'; pressSeg('data-sound', 'mic'); } }
+  else if (src === 'demo') { audio.stopSystem(); systemLabel(); const t = playlist.current() || playlist.tracks[0]; if (t) loadTrack(t, true); }
+  bump();
+}
+function setLanguage(lang) {
+  $('talkLang').value = lang; capLang = captionLanguage(lang); pressSeg('data-lang', lang);
+  document.querySelectorAll('[data-line]').forEach(el => { const t = captionLine(el.dataset.line, capLang); if (t) el.textContent = t; });
+  $('startLine').textContent = captionLine('start', capLang);
+  if (talking) recognition?.stop();   // onend starts again in the new language
+}
 
 // ---------- sound sources ----------
 const player = $('player');
@@ -398,30 +486,37 @@ function handleRequest(action) {
   if (actions.length && !actions.some(a => a.type === 'note')) $('decision').textContent = 'request → ' + action.replace('_', ' ');
 }
 function localCommand(text) {
-  const t = text.toLowerCase(), is = re => re.test(t); let handled = false;
-  if (is(/pause|stop|暫停|停/)) { setPause(true); return true; }
-  if (is(/resume|continue|繼續/)) { setPause(false); return true; }
+  const t = text.toLowerCase(), is = re => re.test(t); let handled = false; const said = [];
+  if (is(/帶我返嚟|帶我回來|返嚟|回來|bring me back|take me back|ground me/)) { setGround(true); return true; }
+  if (grounded && is(/繼續|continue|onward|go on|冇事|沒事/)) { setGround(false); return true; }
+  if (is(/pause|stop|暫停|停/)) { setPause(true); caption(captionLine('pause', capLang)); return true; }
+  if (is(/resume|continue|繼續/)) { setPause(false); caption(captionLine('resume', capLang)); return true; }
   // A world you name in words: go now (unless the scene is locked). A planet, the Earth or space means Life's planet.
   for (const [re, scene] of [[/fish|bird|flock|魚|鳥|海/, 'boids'], [/mycel|network|菌|網/, 'physarum'], [/firefl|sync|螢|同步|星系|galaxy/, 'swarm'], [/\blife\b|cell|生命|planet|earth|星球|地球|太空|space/, 'life']]) if (is(re)) {
     if (sceneLocked) $('decision').textContent = 'The scene is locked; unlock it to travel.';
-    else if (scene !== world) startJump(scene, { manual: true });
+    else if (scene !== world) { startJump(scene, { manual: true }); said.push(worldName(scene, capLang)); }
     handled = true; break;
   }
-  if (is(/slow|慢/)) { handleRequest('slower'); handled = true; }
-  if (is(/fast|快/)) { handleRequest('faster'); handled = true; }
-  if (is(/surround|inside|around me|包圍|hover|stop moving/)) { setShipMode('hover'); handled = true; }
-  if (is(/fly|launch|take off|飛|出發/)) { setShipMode('ship'); handled = true; }
+  // 太快 is a complaint, not a wish for more: "too fast" asks for slower, "too slow" for faster.
+  if (is(/太快|too fast|快過頭|快得滯/)) { handleRequest('slower'); said.push(captionLine('slower', capLang)); handled = true; }
+  else if (is(/太慢|too slow|慢過頭|慢得滯/)) { handleRequest('faster'); said.push(captionLine('faster', capLang)); handled = true; }
+  else {
+    if (is(/slow|慢/)) { handleRequest('slower'); said.push(captionLine('slower', capLang)); handled = true; }
+    if (is(/fast|快/)) { handleRequest('faster'); said.push(captionLine('faster', capLang)); handled = true; }
+  }
+  if (is(/surround|inside|around me|包圍|hover|stop moving/)) { setShipMode('hover'); said.push(captionLine('hover', capLang)); handled = true; }
+  if (is(/fly|launch|take off|飛|出發/)) { setShipMode('ship'); said.push(captionLine('fly', capLang)); handled = true; }
   if (is(/lead me|take over|帶/)) { director.initiative.setBaseline(0.6); setAuto(true); handled = true; }
   if (is(/follow me|跟我|跟住我/)) { director.initiative.setBaseline(-0.6); setAuto(true); handled = true; }
   const view = shotForWords(t);
   if (view) { pickShot(view); handled = true; }
-  if (is(/hold|stay|don.t change|唔好轉|keep/)) { toggleLock(true); handled = true; }
-  if (is(/deeper|more symmetry|kaleid|對稱/)) { setDepth(depth + 0.2); handled = true; }
-  if (is(/shallower|less symmetry|no symmetry|calm|gentle|靜|冷靜/)) { setDepth(depth - 0.2); handled = true; }
-  if (is(/rewind|reset|again|snow|雪|重來/)) { rewind('voice'); handled = true; }
+  if (is(/hold|stay|don.t change|唔好轉|keep/)) { toggleLock(true); said.push(captionLine('hold', capLang)); handled = true; }
+  if (is(/deeper|more symmetry|kaleid|對稱/)) { setDepth(depth + 0.2); said.push(captionLine('deeper', capLang)); handled = true; }
+  if (is(/shallower|less symmetry|no symmetry|calm|gentle|靜|冷靜/)) { setDepth(depth - 0.2); said.push(captionLine('calmer', capLang)); handled = true; }
+  if (is(/rewind|reset|again|snow|雪|重來/)) { rewind('voice'); said.push(captionLine('rewind', capLang)); handled = true; }
   const mood = spokenMood(t);
-  if (mood) { director.setMood(mood); handled = true; }
-  if (handled) bump();
+  if (mood) { director.setMood(mood); said.push(decisionCaption({ mood }, { world, lang: capLang })); handled = true; }
+  if (handled) { bump(); caption(said.filter(Boolean).slice(0, 2).join(' · ')); }
   return handled;
 }
 function jevState(text = '') {
@@ -455,6 +550,7 @@ async function askJev(text = '', force = false) {
   if (decision.palette) said.push(decision.palette);
   if (typeof decision.energy === 'number') said.push(decision.energy > 0.6 ? 'more energy' : decision.energy < 0.35 ? 'calmer' : 'steady');
   jevSaid = 'JEV → ' + (said.join(' · ') || 'keep going'); jevSaidUntil = simClock + 6; jevPulse = 1;
+  caption(decisionCaption(decision, { world, lang: capLang, asked: !!text }));
   const applied = Object.keys(decision).filter(k => !['version', 'confidence', 'hold'].includes(k));
   const left = Object.keys(decision.confidence || {}).filter(k => !applied.includes(k));
   const line = `JEV: ${applied.map(k => k === 'scene' ? `scene→${decision.scene.choice} (${Math.round(decision.scene.p * 100)}%)` : `${k}=${typeof decision[k] === 'number' ? decision[k].toFixed(2) : decision[k]}`).join(' · ') || 'no change'}` +
@@ -464,7 +560,7 @@ async function askJev(text = '', force = false) {
 }
 $('jev').onclick = () => { jev.enabled = !jev.enabled; jevStatus = jev.enabled ? 'connecting' : 'off'; jev.bump(); if (!jev.enabled) director.clearMood(); $('jev').textContent = 'JEV: ' + (jev.enabled ? 'on' : 'off'); $('jev').setAttribute('aria-pressed', String(jev.enabled)); if (jev.enabled) askJev('', true); else $('decision').textContent = 'Local director running.'; };
 // Hosted: a guest never has to find the switch. The probe is the empty POST start-flow.sh also uses to recognise the server.
-if (location.protocol === 'https:') fetch('/api/decide', { method: 'POST' }).then(r => r.status, () => null).then(status => { if (shouldAutoEnable({ protocol: location.protocol, probeStatus: status }) && !jev.enabled) $('jev').onclick(); });
+if (location.protocol === 'https:' || QUIET) fetch('/api/decide', { method: 'POST' }).then(r => r.status, () => null).then(status => { if (shouldAutoEnable({ protocol: location.protocol, probeStatus: status, quiet: QUIET }) && !jev.enabled) $('jev').onclick(); });
 function decide(text = '') {
   // A short command is handled here; a longer sentence also goes to JEV (when on), so a stray word like 慢 inside it
   // does not swallow the rest of what you said.
@@ -501,7 +597,9 @@ function startRecognition() {
   try { r.start(); } catch { /* already started */ }
 }
 $('talkLang').onchange = () => { if (talking) { recognition?.stop(); } };
-function hearText(text) { heard = String(text).slice(0, 40); heardUntil = simClock + 4; touch(); }
+function hearText(text) { heard = String(text).slice(0, 40); heardUntil = simClock + 4; lastSpoken = simClock; touch(); }
+setLanguage(talkLanguage(navigator.language));   // after Talk's state exists: the ear's dialect and the captions' script follow the browser
+window.__flow.decide = decide;
 
 // ---------- the frame ----------
 function stepSims(h, out) {
@@ -545,7 +643,8 @@ function animate() {
 }
 function frame(dt) {
   simClock += dt; const now = simClock;
-  if (now - lastInteraction > 3 && !document.body.classList.contains('idle') && $('drawer').hidden) document.body.classList.add('idle');
+  if (!QUIET && now - lastInteraction > 3 && !document.body.classList.contains('idle') && $('drawer').hidden) document.body.classList.add('idle');
+  stepCaptions(); stepHints();
   act(gestures.tick(performance.now()));
   const frames = audio.frames(now);
   ensureFeatures(frames.sampleRate);
