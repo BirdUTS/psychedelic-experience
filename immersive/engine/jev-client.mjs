@@ -2,6 +2,7 @@
    JEV sets targets in a fixed vocabulary; nothing here touches a frame. */
 import { SCENES, PALETTES, FOLDS } from './arcs.mjs';
 import { MOODS } from './grammar.mjs';
+import { ALL_VIEWS } from './shots.mjs';
 
 export const REQUEST_ACTIONS = ['none', 'slower', 'faster', 'warmer', 'cooler', 'surround', 'calm_down', 'hold_scene', 'change_scene', 'more_symmetry', 'less_symmetry'];
 export const INITIATIVES = ['follow', 'mutual', 'lead'];
@@ -43,6 +44,7 @@ export function validateDecision(raw, { sentVersion, sentAt, now, maxAge = 10, f
     initiative: v => INITIATIVES.includes(v),
     request: v => REQUEST_ACTIONS.includes(v),
     mood: v => MOODS.includes(v),
+    view: v => ALL_VIEWS.includes(v),
   };
   for (const k in checks) {
     if (raw[k] === undefined || raw[k] === null) continue;

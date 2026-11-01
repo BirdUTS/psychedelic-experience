@@ -29,23 +29,31 @@ export const SHOTS = {
   ],
 };
 
+export const ALL_VIEWS = [...new Set(Object.values(SHOTS).flat().map(s => s.name))];
+
 export class ShotDirector {
   constructor(world = 'physarum', { phrasesPerShot = 2 } = {}) {
-    this.phrasesPerShot = phrasesPerShot; this.world = world; this.index = 0; this.count = 0; this.changed = true;
+    this.phrasesPerShot = phrasesPerShot; this.world = world; this.index = 0; this.count = 0; this.changed = true; this.queued = null;
   }
   get list() { return SHOTS[this.world] || SHOTS.physarum; }
   get shot() { return this.list[this.index % this.list.length]; }
   update({ phrase = false, world = this.world } = {}) {
     this.changed = false;
     if (world !== this.world) { this.world = world; this.index = 0; this.count = 0; this.changed = true; return this.shot; }
-    if (phrase && ++this.count >= this.phrasesPerShot) this.next();
+    if (phrase && ++this.count >= this.phrasesPerShot) {
+      const q = this.queued;
+      if (!(q && this.pick(q))) this.next();
+      this.queued = null;
+    }
     return this.shot;
   }
   next() { this.index = (this.index + 1) % this.list.length; this.count = 0; this.changed = true; return this.shot; }
+  // JEV's view: taken at the next scheduled change, so the director's rhythm holds (ignored if this world has no such view).
+  queue(name) { this.queued = ALL_VIEWS.includes(name) ? name : null; }
   pick(name) {
     const i = this.list.findIndex(s => s.name === name);
     if (i < 0) return false;
-    this.index = i; this.count = 0; this.changed = true; return true;
+    this.index = i; this.count = 0; this.changed = true; this.queued = null; return true;   // an explicit pick replaces any queued view
   }
 }
 

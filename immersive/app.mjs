@@ -15,7 +15,7 @@ import { PostFX } from './engine/post.mjs';
 import { defaultProgram, programFor, applyMood, capProgram, CONTINUOUS, DISCRETE } from './engine/grammar.mjs';
 import { Phases } from './engine/phases.mjs';
 import { Passages } from './engine/passages.mjs';
-import { ShotDirector, shotPose, shotForWords } from './engine/shots.mjs';
+import { ShotDirector, shotPose, shotForWords, SHOTS } from './engine/shots.mjs';
 import { VisualGestures } from './engine/visual-gestures.mjs';
 import { JevClient, buildState } from './engine/jev-client.mjs';
 import { directorInput } from './engine/streams.mjs';
@@ -52,7 +52,10 @@ const program = defaultProgram(), target = defaultProgram(), current = defaultPr
 const visualGestures = new VisualGestures(), phases = new Phases(), passages = new Passages(), voiceEnv = new VoiceEnvelope();
 let heard = '', heardUntil = -Infinity;
 const shots = new ShotDirector('physarum'), camPos = new THREE.Vector3(0, 2, 19), camLook = new THREE.Vector3(), poseV = new THREE.Vector3();
-let shotStarted = 0, chaseIndex = 0, shotGlide = 0;   // the last words Talk heard, shown on the HUD for a few seconds
+let shotStarted = 0, chaseIndex = 0, shotGlide = 0;
+// JEV, made visible: its connection on the HUD, its answer spoken on the HUD for a few seconds, and a ripple when it acts.
+let jevStatus = 'off', jevSaid = '', jevSaidUntil = -Infinity, jevPulse = 0;
+const WORLD_NAMES = { physarum: 'mycelium', swarm: 'fireflies', boids: 'fish', life: 'Life planet' };   // the last words Talk heard, shown on the HUD for a few seconds
 
 // ---------- engine ----------
 const sims = { physarum: new Physarum(), swarm: new Swarmalators(), boids: new Boids(), life: new Life(64, 1) };
@@ -82,7 +85,7 @@ let lastJevAsk = -Infinity;
 const timing = { step: 0, steps: 0, render: 0, post: 0, dt: 0 };
 let calm = false, quality = 1, lowFpsFor = 0, highFpsFor = 0, programStarted = false, lastGestureEnd = -Infinity, prevGesture = null, rewindFired = false, jumpFired = false, lastJump = false, depthTouched = false, leavingByGlyph = false, landedFired = false;
 window.__flow = {
-  director, audio, sims, worlds, ship, liveliness, rings, timing, jev, gestures, post, program, target, current, visualGestures, phases, passages, voiceEnv, shots, nextShot: () => nextShot(), pickShot: n => pickShot(n), forceVoice: null, hear: text => hearText(text),
+  director, audio, sims, worlds, ship, liveliness, rings, timing, jev, gestures, post, program, target, current, visualGestures, phases, passages, voiceEnv, shots, get jevStatus() { return jevStatus; }, get jevSaid() { return jevSaid; }, nextShot: () => nextShot(), pickShot: n => pickShot(n), forceVoice: null, hear: text => hearText(text),
   forceProgram: null,   // a partial program merged over the computed one (checks)
   get calm() { return calm; }, set calm(v) { calm = !!v; $('calm').checked = calm; }, get quality() { return quality; }, immerse,
   get musicF() { return musicF; }, get roomF() { return roomF; }, get depth() { return depth; }, set depth(v) { setDepth(v); },
@@ -93,13 +96,13 @@ window.__flow = {
 };
 
 // ---------- worlds, scenes, snapshots ----------
-function choose(id, { auto = false } = {}) {
+function choose(id, { auto = false, keepMood = false } = {}) {
   if (!WORLDS[id]) return;
   world = id; shots.update({ world: id }); worlds.build(id, ship.mode, $('skin').value, shots.shot.layout || 'sphere'); startShot();
   const a = WORLDS[id];
   $('chapter').textContent = a[0]; $('worldTitle').innerHTML = a[1]; $('worldHint').textContent = a[2]; $('rule').textContent = a[3];
   document.querySelectorAll('[data-world]').forEach(b => { const on = b.dataset.world === id; b.classList.toggle('selected', on); b.setAttribute('aria-pressed', String(on)); });
-  director.acknowledgeScene(id);
+  director.acknowledgeScene(id, { keepMood });
   if (!auto) bump();
   // A world that was frozen when we left it comes back from its best snapshot (after the jump lands).
   if (liveliness.value(id) < 0.35 && rings[id].count) { if (jump) jump.rewindOnLand = true; else rewind('return'); }
@@ -126,11 +129,11 @@ function startJump(next, { manual = false } = {}) {
   if (jump || !WORLDS[next] || next === world) return;
   finishDissolve();   // a jump over a half-finished rewind would leave the arriving world frozen
   if (manual) bump();
-  jump = { t: 0, to: next, switched: false, rewindOnLand: false }; jumpFired = true;
+  jump = { t: 0, to: next, switched: false, rewindOnLand: false, manual }; jumpFired = true;
 }
 function updateJump(dt) {
   jump.t += dt;
-  if (!jump.switched && jump.t >= 2) { jump.switched = true; choose(jump.to, { auto: true }); }
+  if (!jump.switched && jump.t >= 2) { jump.switched = true; choose(jump.to, { auto: true, keepMood: jump.manual }); }
   const u = jump.t < 2 ? jump.t / 2 : (jump.t - 2) / 2;
   group.scale.set(1, 1, jump.t < 2 ? 1 - 0.9 * u : 0.6 + 0.4 * Math.min(1, u));
   if (jump.t >= 4 || (jump.switched && world !== jump.to)) {   // never leave a jump hanging
@@ -398,7 +401,12 @@ function localCommand(text) {
   const t = text.toLowerCase(), is = re => re.test(t); let handled = false;
   if (is(/pause|stop|暫停|停/)) { setPause(true); return true; }
   if (is(/resume|continue|繼續/)) { setPause(false); return true; }
-  for (const [re, scene] of [[/fish|bird|flock|魚|鳥/, 'boids'], [/mycel|network|菌|網/, 'physarum'], [/firefl|sync|螢|同步/, 'swarm'], [/\blife\b|cell|生命/, 'life']]) if (is(re)) { director.requestScene(scene); handled = true; }
+  // A world you name in words: go now (unless the scene is locked). A planet, the Earth or space means Life's planet.
+  for (const [re, scene] of [[/fish|bird|flock|魚|鳥|海/, 'boids'], [/mycel|network|菌|網/, 'physarum'], [/firefl|sync|螢|同步|星系|galaxy/, 'swarm'], [/\blife\b|cell|生命|planet|earth|星球|地球|太空|space/, 'life']]) if (is(re)) {
+    if (sceneLocked) $('decision').textContent = 'The scene is locked; unlock it to travel.';
+    else if (scene !== world) startJump(scene, { manual: true });
+    handled = true; break;
+  }
   if (is(/slow|慢/)) { handleRequest('slower'); handled = true; }
   if (is(/fast|快/)) { handleRequest('faster'); handled = true; }
   if (is(/surround|inside|around me|包圍|hover|stop moving/)) { setShipMode('hover'); handled = true; }
@@ -427,9 +435,26 @@ function jevState(text = '') {
 async function askJev(text = '', force = false) {
   lastJevAsk = simClock;
   const decision = await jev.maybeRequest(() => jevState(text), { force });
-  if (!decision) { if (jev.lastError) $('decision').textContent = `JEV unavailable (${jev.lastError}); local rules continue.`; return; }
+  if (!decision) {
+    if (jev.lastError) { jevStatus = 'offline'; $('decision').textContent = `JEV unavailable (${jev.lastError}); local rules continue. JEV needs the local server: run scripts/start-flow.sh (or double-click start-flow.command).`; }
+    return;
+  }
+  jevStatus = 'ok';
   director.applyDecision(decision);
-  if (text && decision.mood) director.setMood(decision.mood);   // a mood you asked for in words applies at once
+  if (text) {
+    // You asked in words: what JEV chose happens now, not at the next phrase, and talking does not block it.
+    if (decision.scene && decision.scene.choice !== world && decision.scene.p >= 0.5) startJump(decision.scene.choice, { manual: true });
+    if (decision.palette) director.setPalette(decision.palette);
+    if (decision.mood) director.setMood(decision.mood);
+    if (decision.view) pickShot(decision.view);
+  } else if (decision.view) shots.queue(decision.view);   // on its own, JEV picks the next view when the shot changes
+  const said = [];
+  if (decision.scene && decision.scene.choice !== world && (text ? decision.scene.p >= 0.5 : decision.scene.p >= 0.6)) said.push(WORLD_NAMES[decision.scene.choice] || decision.scene.choice);
+  if (decision.view) said.push((Object.values(SHOTS).flat().find(s => s.name === decision.view) || {}).label || decision.view);
+  if (decision.mood) said.push(decision.mood);
+  if (decision.palette) said.push(decision.palette);
+  if (typeof decision.energy === 'number') said.push(decision.energy > 0.6 ? 'more energy' : decision.energy < 0.35 ? 'calmer' : 'steady');
+  jevSaid = 'JEV → ' + (said.join(' · ') || 'keep going'); jevSaidUntil = simClock + 6; jevPulse = 1;
   const applied = Object.keys(decision).filter(k => !['version', 'confidence', 'hold'].includes(k));
   const left = Object.keys(decision.confidence || {}).filter(k => !applied.includes(k));
   const line = `JEV: ${applied.map(k => k === 'scene' ? `scene→${decision.scene.choice} (${Math.round(decision.scene.p * 100)}%)` : `${k}=${typeof decision[k] === 'number' ? decision[k].toFixed(2) : decision[k]}`).join(' · ') || 'no change'}` +
@@ -437,7 +462,7 @@ async function askJev(text = '', force = false) {
   recentDecisions.push(line.slice(0, 120)); while (recentDecisions.length > 3) recentDecisions.shift();
   $('decision').textContent = line;
 }
-$('jev').onclick = () => { jev.enabled = !jev.enabled; jev.bump(); if (!jev.enabled) director.clearMood(); $('jev').textContent = 'JEV: ' + (jev.enabled ? 'on' : 'off'); $('jev').setAttribute('aria-pressed', String(jev.enabled)); if (jev.enabled) askJev('', true); else $('decision').textContent = 'Local director running.'; };
+$('jev').onclick = () => { jev.enabled = !jev.enabled; jevStatus = jev.enabled ? 'connecting' : 'off'; jev.bump(); if (!jev.enabled) director.clearMood(); $('jev').textContent = 'JEV: ' + (jev.enabled ? 'on' : 'off'); $('jev').setAttribute('aria-pressed', String(jev.enabled)); if (jev.enabled) askJev('', true); else $('decision').textContent = 'Local director running.'; };
 function decide(text = '') {
   // A short command is handled here; a longer sentence also goes to JEV (when on), so a stray word like 慢 inside it
   // does not swallow the rest of what you said.
@@ -586,7 +611,8 @@ function frame(dt) {
     // Your voice (room speech or a clap; the mic alone plays both roles): analysed here, never recorded or sent.
     const roomSpeech = frames.room ? roomF.speech : frames.source === 'mic' ? musicF.speech : 0;
     const roomClap = frames.room ? roomF.onset : frames.source === 'mic' ? musicF.onset : 0;
-    const voice = window.__flow.forceVoice ?? (paused ? voiceEnv.value : voiceEnv.update(dt, { speech: roomSpeech, onset: roomClap }));
+    jevPulse = Math.max(0, jevPulse - dt / 1.5);
+    const voice = Math.max(window.__flow.forceVoice ?? (paused ? voiceEnv.value : voiceEnv.update(dt, { speech: roomSpeech, onset: roomClap })), 0.8 * jevPulse);   // you, or JEV answering
     programFor({ I: out.I, A: out.As, E: out.hud.E, C: out.hud.C, H: out.targets.H, L, heat: out.heat, ship: ship.mode, diving: ship.diving, jump: !!jump, calm, arcS: out.arcS, world, raw: rawNow, voice }, depth, target);
     // The arc's F axis biases the echo decay by ±0.2 around the arcs' neutral 0.3. (Its S axis has no room: Depth is
     // both the fold's floor (v2) and its ceiling (v3), so the fold is Depth's whenever the world leads.)
@@ -647,7 +673,8 @@ function updateHUD(out, frames, L) {
   line += ` · life ${L.toFixed(2)}` + (out.heat > 0 ? ` · heat +${out.heat.toFixed(2)}` : '') + (dissolving ? ' · REWIND' : '') + (jump ? ' · JUMP' : '') + (ship.diving ? ' · DIVE' : '') + (passages.raw && !jump ? ' · RAW' : '') + (visualGestures.active ? ' · ' + visualGestures.active.toUpperCase() : '') + (paused ? ' · PAUSED' : '');
   if (out.mood) line += ' · ' + out.mood.toUpperCase();
   if (simClock < heardUntil) line += ` · “${heard}”`;
-  line += navigator.onLine && jev.enabled ? ' · JEV' : ' · LOCAL';
+  if (simClock < jevSaidUntil) line += ' · ' + jevSaid;
+  line += !jev.enabled ? ' · LOCAL' : !navigator.onLine || jevStatus === 'offline' ? ' · JEV OFFLINE' : jevStatus === 'ok' ? ' · JEV' : ' · JEV…';
   $('hud').textContent = line;
 }
 function updateExplain(out, L) {

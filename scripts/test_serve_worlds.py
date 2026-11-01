@@ -11,7 +11,8 @@ GOOD_STATE = {'scene': 'swarm', 'sceneAge': 12.3, 'arc': {'name': 'tidal', 'wayp
 class ServeWorlds(unittest.TestCase):
     def test_questions_cover_the_spec(self):
         q = sw.build_questions(GOOD_STATE)
-        self.assertEqual(set(q), {'hold', 'scene', 'energy', 'entropy', 'symmetry', 'palette', 'initiative', 'mood'})
+        self.assertEqual(set(q), {'hold', 'scene', 'energy', 'entropy', 'symmetry', 'palette', 'initiative', 'mood', 'view'})
+        self.assertEqual(q['view']['type'], 'choice'); self.assertEqual(set(q['view']['criteria']), set(sw.VIEWS))
         self.assertEqual(q['mood']['type'], 'choice'); self.assertEqual(set(q['mood']['criteria']), set(sw.MOODS))
         self.assertEqual(sw.MOODS, ['clear', 'dream', 'melt', 'electric', 'holy'])
         self.assertEqual(q['hold']['type'], 'noul'); self.assertEqual(q['scene']['type'], 'choice')
@@ -36,17 +37,20 @@ class ServeWorlds(unittest.TestCase):
                    'symmetry': {'type': 'score', 'score': 3, 'probabilities': {}, 'legend': {}, 'confidence': .9},
                    'palette': {'type': 'choice', 'choice': 'ember', 'probabilities': {'ember': 1}, 'confidence': .7},
                    'initiative': {'type': 'choice', 'choice': 'lead', 'probabilities': {'lead': .5}, 'confidence': .5},
-                   'mood': {'type': 'choice', 'choice': 'melt', 'probabilities': {'melt': .8}, 'confidence': .8}}
+                   'mood': {'type': 'choice', 'choice': 'melt', 'probabilities': {'melt': .8}, 'confidence': .8},
+                   'view': {'type': 'choice', 'choice': 'satellite', 'probabilities': {'satellite': .7}, 'confidence': .7}}
         d = sw.map_answers(answers, 4)
         self.assertEqual(d['version'], 4); self.assertAlmostEqual(d['hold'], .7)
         self.assertEqual(d['scene'], {'choice': 'boids', 'p': .62}); self.assertAlmostEqual(d['energy'], .75)
         self.assertEqual(d['symmetry'], 6); self.assertEqual(d['palette'], 'ember'); self.assertEqual(d['initiative'], 'lead')
         self.assertAlmostEqual(d['confidence']['entropy'], .3)
         self.assertEqual(d['mood'], 'melt'); self.assertAlmostEqual(d['confidence']['mood'], .8)
+        self.assertEqual(d['view'], 'satellite')
         for bad in [('palette', {'type': 'choice', 'choice': 'puce', 'probabilities': {}, 'confidence': .9}),
                     ('symmetry', {'type': 'score', 'score': 7, 'probabilities': {}, 'legend': {}, 'confidence': .9}),
                     ('hold', {'type': 'noul', 'noul': 2}),
-                    ('mood', {'type': 'choice', 'choice': 'angry', 'probabilities': {}, 'confidence': .9})]:
+                    ('mood', {'type': 'choice', 'choice': 'angry', 'probabilities': {}, 'confidence': .9}),
+                    ('view', {'type': 'choice', 'choice': 'helicopter', 'probabilities': {}, 'confidence': .9})]:
             with self.assertRaises(ValueError):
                 sw.map_answers({**answers, bad[0]: bad[1]}, 4)
 

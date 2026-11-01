@@ -18,14 +18,15 @@ SCENES = ['physarum', 'swarm', 'boids', 'life']
 PALETTES = ['ink', 'silk', 'ember', 'neon']
 INITIATIVES = ['follow', 'mutual', 'lead']
 REQUESTS = ['none', 'slower', 'faster', 'warmer', 'cooler', 'surround', 'calm_down', 'hold_scene', 'change_scene', 'more_symmetry', 'less_symmetry']
-MOODS = ['clear', 'dream', 'melt', 'electric', 'holy']   # v3: a bias over the visual grammar, committed on the next phrase boundary
+MOODS = ['clear', 'dream', 'melt', 'electric', 'holy']
+VIEWS = ['satellite', 'lowOrbit', 'distant', 'dish', 'inside', 'far', 'chase', 'below', 'side', 'orbit']   # immersive/engine/shots.mjs   # v3: a bias over the visual grammar, committed on the next phrase boundary
 FOLDS = [0, 2, 4, 6, 8]
 
 SCENE_CRITERIA = {
-    'physarum': 'A slowly growing network of trails and branches; a woven, organic, exploratory feel.',
-    'swarm': 'Synchronising firefly lights that pulse together, form rings and phase waves; hypnotic, rhythmic.',
-    'boids': 'A surrounding school of fish or flock of birds streaming past the viewer; motion, flow, speed.',
-    'life': 'Cellular life blinking on a spherical world; crisp, geometric, small rules.',
+    'physarum': 'Mycelium: a slowly growing network of trails and branches on a sphere or in a petri dish; woven, organic, exploratory.',
+    'swarm': 'Fireflies: synchronising lights that pulse together, form rings and phase waves, like a galaxy or a night sky; hypnotic, rhythmic.',
+    'boids': 'Fish: a school of fish or flock of birds streaming past, seen from the side, from below or following one; motion, flow, speed, the sea.',
+    'life': 'A living planet: Conway cells as lights on a globe with an ocean and an atmosphere, watched from a satellite or low orbit; space, Earth, a world seen from above, crisp small rules.',
 }
 ENERGY_LEVELS = ['still: near-silent or very sparse sound', 'calm: quiet, slow, spacious', 'moving: moderate pulse, clear motion',
                  'driving: strong steady groove', 'peak: dense, loud, climactic']
@@ -115,6 +116,20 @@ MOOD_CRITERIA = {
 }
 
 
+VIEW_CRITERIA = {
+    'satellite': 'Satellite: orbit the world from outside and see all of it, like a planet from space.',
+    'lowOrbit': 'Low orbit: skim close over the surface toward a curved horizon.',
+    'distant': 'Distant: a long lens from far away, the whole world small and calm.',
+    'dish': 'Petri dish: look straight down on the network as if under a microscope.',
+    'inside': 'Inside: stand in the middle of it, surrounded.',
+    'far': 'Far: the swarm as one galaxy-like shape in the distance.',
+    'chase': 'Chase: follow one creature closely and move with it.',
+    'below': 'Below: look up from underneath at the silhouettes.',
+    'side': 'Side: a calm side view, like an aquarium.',
+    'orbit': 'Kaleidoscope: the symmetric, mirrored climax view.',
+}
+
+
 def build_questions(state):
     q = {
         'hold': {'type': 'noul', 'instructions': PREFIX + 'Given the recent sound and how long the current scene has run (sceneAge in seconds), should the world HOLD its current state rather than move on?',
@@ -126,6 +141,7 @@ def build_questions(state):
         'symmetry': {'type': 'score', 'instructions': PREFIX + 'Rate how much kaleidoscopic symmetry suits this passage.', 'criteria': SYMMETRY_LEVELS},
         'palette': {'type': 'choice', 'instructions': PREFIX + 'Choose a colour palette for this passage.', 'criteria': PALETTE_CRITERIA},
         'initiative': {'type': 'choice', 'instructions': PREFIX + 'Should the world lead the room, follow it, or stay mutual? High agency (people acting) favours follow; a quiet absorbed room favours lead.', 'criteria': INITIATIVE_CRITERIA},
+        'view': {'type': 'choice', 'instructions': PREFIX + 'Choose where the observer should look from next. If userRequest describes a place or a way of watching (from space, inside, following, from below, under a microscope), choose that view.', 'criteria': VIEW_CRITERIA},
         'mood': {'type': 'choice', 'instructions': PREFIX + 'Choose the visual mood for the next passage: a bias over the picture\'s grammar, not a reading of anyone\'s state.', 'criteria': MOOD_CRITERIA},
     }
     if state.get('userText'):
@@ -171,7 +187,7 @@ def map_answers(answers, version):
     if 'symmetry' in answers:
         score, conf = _score(answers['symmetry'], 5)
         result['symmetry'] = FOLDS[int(round(score))]; result['confidence']['symmetry'] = conf
-    for key, allowed in (('palette', PALETTES), ('initiative', INITIATIVES), ('request', REQUESTS), ('mood', MOODS)):
+    for key, allowed in (('palette', PALETTES), ('initiative', INITIATIVES), ('request', REQUESTS), ('mood', MOODS), ('view', VIEWS)):
         if key in answers:
             choice, _, conf = _choice(answers[key], allowed)
             result[key] = choice; result['confidence'][key] = conf

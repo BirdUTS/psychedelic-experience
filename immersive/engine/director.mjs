@@ -4,7 +4,7 @@
 import { BeatClock, WorldClock, BeatPredictor } from './beat-clock.mjs';
 import { Agency } from './agency.mjs';
 import { Initiative } from './initiative.mjs';
-import { ArcPlayer } from './arcs.mjs';
+import { ArcPlayer, PALETTES } from './arcs.mjs';
 import { MOODS } from './grammar.mjs';
 
 const clamp = (v, lo, hi) => v < lo ? lo : v > hi ? hi : v;
@@ -35,12 +35,12 @@ export class Director {
   // at once when it follows (I ≤ −0.5), never while the scene is locked. Bypasses dwell and agency gates.
   requestScene(name) { this.userSceneRequest = name && name !== this.scene ? name : null; }
 
-  acknowledgeScene(name) {
+  acknowledgeScene(name, { keepMood = false } = {}) {
     if (name) this.scene = name;
     this.sceneAge = 0;
     if (this.jevSceneRequest === this.scene) this.jevSceneRequest = null;
     if (this.userSceneRequest === this.scene) this.userSceneRequest = null;
-    this.clearMood();   // a mood was chosen for the passage that just ended
+    if (!keepMood) this.clearMood();   // a mood was chosen for the passage that just ended (unless you asked for both)
     this.heat = 0; this.heating = false; this.belowSince = null; this.deepSince = null;   // a new world starts with a clean metabolism
   }
 
@@ -62,6 +62,7 @@ export class Director {
 
   clearMood() { this.mood = null; this.pendingMood = null; }
   // A mood you asked for in words applies at once (your request, like your hand on Depth).
+  setPalette(p) { if (PALETTES.includes(p)) this.palette = p; }   // asked for in words: at once
   setMood(mood) { if (MOODS.includes(mood)) { this.mood = mood; this.pendingMood = null; } }
 
   applyDecision(decision) {

@@ -1,5 +1,28 @@
 # Flow with Mind — how to start, what to try, what was tested
 
+## v3.4 (2026-11-01): JEV you can feel
+
+Bird: "JEV has no reaction at all — what can it change?" Causes: no server was running (the page opened from the offline cache, JEV's requests had nowhere to go, the failure was written only in the drawer while the HUD still said `JEV`); and when it did answer, its changes were hidden — scene changes were blocked while you spoke (talking makes the world follow), the fold it chose was zeroed by the clean shots, palette and mood waited for a phrase, and nothing on screen said what it had decided.
+
+**Start (one click):** double-click `start-flow.command` in the project folder, or run `scripts/start-flow.sh`. It starts the local server (reusing one that is already running), checks the JEV key, and opens Chrome at the app. Then ⚙ → **JEV: on** (and Room mic / Talk if you want to speak).
+
+**What JEV can change now, and how you see it:**
+
+| JEV decides | What happens |
+|---|---|
+| which world (scene) | asked in words: travels at once; on its own: at a phrase, while it leads |
+| the view (new question) | asked in words: that view at once; on its own: the next view when the shot changes |
+| mood | dream / melt / electric / clear / holy, at once when asked |
+| palette | ink / silk / ember / neon, at once when asked |
+| energy and entropy | the simulations' speed, density and order |
+| initiative, hold | who leads, how long the arc holds |
+
+Every decision shows on the HUD for six seconds (`JEV → Life planet · satellite orbit · dream · steady`) and sends a ripple out from the centre. The HUD shows `JEV…` while connecting, `JEV` when it answered, `JEV OFFLINE` when it cannot be reached (the drawer then says how to start the server). Spoken world names travel at once too (星球 / 地球 / 太空 → the Life planet, 海 → the fish, 星系 → the fireflies), unless the scene is locked; a mood you asked for survives the trip.
+
+Tested by machine: 165 node tests + 4 Python (view queue and explicit pick clearing it, view validation, immediate palette, mood kept through a scene change you asked for, the server's view question). Tested live with the real JEV in the app's pane: 「帶我去一個星球，好似衛星咁望住佢」 → jumped to the Life planet at once, satellite orbit, mood dream kept, HUD line as above; JEV forced offline → `JEV OFFLINE` and the start hint. Cache `extra-worlds-v13`.
+
+---
+
 ## v3.3 (2026-10-30): the observer moves — shots instead of one kaleidoscope
 
 Bird: still kaleidoscope style; wanted the observer's angle to change, e.g. Game of Life as a planet watched from a satellite. Two more causes of the "kaleidoscope look" were found: following defaulted to a four-way mirror even with no fold, and the camera only ever orbited a sphere or flew a tunnel.
