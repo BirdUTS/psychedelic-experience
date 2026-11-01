@@ -1,4 +1,6 @@
-import unittest, sys, pathlib
+import contextlib, http.client, io, os, threading, unittest, sys, pathlib
+from http.server import ThreadingHTTPServer
+from unittest import mock
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 import serve_worlds as sw
 
@@ -65,6 +67,132 @@ class ServeWorlds(unittest.TestCase):
             h.log_message('"%s" %s %s', 'GET /immersive/ HTTP/1.1', '200', '-')
         logged = err.getvalue()
         self.assertIn('/api/decide', logged); self.assertNotIn('/immersive/', logged)
+
+
+TOKEN = 'test-invite-token-0123456789'
+HOSTED_KEYS = ('FLOW_INVITE', 'ALLOWED_HOSTS', 'COOKIE_SECURE', 'RENDER_EXTERNAL_HOSTNAME')
+
+
+@contextlib.contextmanager
+def serving(**env):
+    """Run the real handler on an ephemeral loopback port under the given environment; yield the port."""
+    with mock.patch.dict(os.environ, env), contextlib.redirect_stderr(io.StringIO()):
+        for key in HOSTED_KEYS:
+            if key not in env:
+                os.environ.pop(key, None)
+        server = ThreadingHTTPServer(('127.0.0.1', 0), sw.Handler)
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        try:
+            yield server.server_address[1]
+        finally:
+            server.shutdown(); server.server_close()
+
+
+def call(port, method, path, headers=None, body=None):
+    conn = http.client.HTTPConnection('127.0.0.1', port, timeout=5)
+    conn.request(method, path, body=body, headers=headers or {})
+    r = conn.getresponse(); data = r.read(); conn.close()
+    return r.status, {k.lower(): v for k, v in r.getheaders()}, data
+
+
+def get(port, path, headers=None):
+    return call(port, 'GET', path, headers)
+
+
+def post(port, path, headers=None, body=b'{}'):
+    return call(port, 'POST', path, headers, body)
+
+
+class HostedMode(unittest.TestCase):
+    """The same server behind Render: an invite link gates the whole site, Host is checked, cookies are Secure."""
+
+    def test_root_redirects_to_the_app(self):
+        with serving() as port:
+            status, h, _ = get(port, '/')
+        self.assertEqual(status, 302); self.assertEqual(h['location'], '/immersive/')
+
+    def test_gate_off_without_invite_serves_the_app(self):
+        with serving() as port:
+            status, _, _ = get(port, '/immersive/')
+        self.assertEqual(status, 200)
+
+    def test_gate_blocks_a_visitor_without_the_invite(self):
+        with serving(FLOW_INVITE=TOKEN) as port:
+            status, h, body = get(port, '/immersive/')
+            api, _, _ = post(port, '/api/decide')
+        self.assertEqual(status, 403); self.assertIn(b'invite', body.lower()); self.assertNotIn('set-cookie', h)
+        self.assertEqual(api, 403)
+
+    def test_invite_link_sets_a_cookie_and_drops_the_token_from_the_url(self):
+        with serving(FLOW_INVITE=TOKEN) as port:
+            status, h, _ = get(port, '/immersive/?k=' + TOKEN)
+        self.assertEqual(status, 302); self.assertEqual(h['location'], '/immersive/')
+        cookie = h['set-cookie']
+        self.assertTrue(cookie.startswith('flow_invite='), cookie)
+        for attr in ('HttpOnly', 'SameSite=Lax', 'Path=/', 'Max-Age='):
+            self.assertIn(attr, cookie)
+        self.assertNotIn(TOKEN, cookie)      # the cookie never carries the shareable token itself
+        self.assertNotIn('Secure', cookie)   # plain http on loopback
+
+    def test_invite_link_on_the_root_lands_in_the_app(self):
+        with serving(FLOW_INVITE=TOKEN) as port:
+            status, h, _ = get(port, '/?k=' + TOKEN)
+        self.assertEqual(status, 302); self.assertEqual(h['location'], '/immersive/'); self.assertIn('set-cookie', h)
+
+    def test_cookie_from_the_invite_opens_the_app_and_the_api(self):
+        with serving(FLOW_INVITE=TOKEN) as port:
+            _, h, _ = get(port, '/immersive/?k=' + TOKEN)
+            cookie = h['set-cookie'].split(';')[0]
+            status, _, _ = get(port, '/immersive/', {'Cookie': cookie})
+            api, _, _ = post(port, '/api/decide', {'Cookie': cookie})
+        self.assertEqual(status, 200)
+        self.assertEqual(api, 400)   # past the gate, the usual request validation answers
+
+    def test_wrong_or_stale_invite_is_refused(self):
+        with serving(FLOW_INVITE=TOKEN) as port:
+            wrong, h, _ = get(port, '/immersive/?k=' + TOKEN[:-1])
+            stale, _, _ = get(port, '/immersive/', {'Cookie': 'flow_invite=deadbeef'})
+        self.assertEqual(wrong, 403); self.assertNotIn('set-cookie', h); self.assertEqual(stale, 403)
+
+    def test_cookie_is_secure_behind_the_tls_proxy(self):
+        with serving(FLOW_INVITE=TOKEN) as port:
+            _, h, _ = get(port, '/immersive/?k=' + TOKEN, {'X-Forwarded-Proto': 'https'})
+        self.assertIn('Secure', h['set-cookie'])
+        self.assertIn('strict-transport-security', h)
+
+    def test_allowed_hosts_rejects_other_hosts(self):
+        with serving(ALLOWED_HOSTS='flow.birdview.hk') as port:
+            other, _, _ = get(port, '/immersive/', {'Host': 'evil.example'})
+            loop, _, _ = get(port, '/immersive/')   # once hosts are configured, the bare address is no longer one of them
+            ok, _, _ = get(port, '/immersive/', {'Host': 'Flow.Birdview.hk'})
+        self.assertEqual(other, 403); self.assertEqual(loop, 403); self.assertEqual(ok, 200)
+
+    def test_render_external_hostname_is_allowed(self):
+        with serving(ALLOWED_HOSTS='flow.birdview.hk', RENDER_EXTERNAL_HOSTNAME='flow-with-mind.onrender.com') as port:
+            status, _, _ = get(port, '/immersive/', {'Host': 'flow-with-mind.onrender.com'})
+        self.assertEqual(status, 200)
+
+    def test_local_default_hosts_are_loopback_on_the_bound_port(self):
+        with serving() as port:
+            ok, _, _ = get(port, '/immersive/', {'Host': f'localhost:{port}'})
+            other, _, _ = get(port, '/immersive/', {'Host': 'evil.example'})
+        self.assertEqual(ok, 200); self.assertEqual(other, 403)
+
+    def test_static_responses_carry_nosniff_and_no_referrer(self):
+        with serving() as port:
+            _, h, _ = get(port, '/immersive/')
+        self.assertEqual(h.get('x-content-type-options'), 'nosniff'); self.assertEqual(h.get('referrer-policy'), 'no-referrer')
+
+    def test_public_bind_refuses_to_start_without_hosts_and_invite(self):
+        with mock.patch.dict(os.environ, {'ALLOWED_HOSTS': '', 'FLOW_INVITE': ''}):
+            sw.check_public_config('127.0.0.1')   # loopback never needs them
+            with self.assertRaises(SystemExit):
+                sw.check_public_config('0.0.0.0')
+        with mock.patch.dict(os.environ, {'ALLOWED_HOSTS': 'flow.birdview.hk', 'FLOW_INVITE': ''}):
+            with self.assertRaises(SystemExit):
+                sw.check_public_config('0.0.0.0')
+        with mock.patch.dict(os.environ, {'ALLOWED_HOSTS': 'flow.birdview.hk', 'FLOW_INVITE': TOKEN}):
+            sw.check_public_config('0.0.0.0')
 
 
 if __name__ == '__main__':

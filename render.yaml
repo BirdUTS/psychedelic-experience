@@ -1,0 +1,23 @@
+# Render Blueprint for Flow with Mind (2026-11-01). Render → New → Blueprint → pick BirdUTS/psychedelic-experience;
+# Render reads this file and asks only for the value marked sync: false. The same chain as Story Stage
+# (story.birdview.hk): stdlib Python server, secrets typed in the Render dashboard, one CNAME in the Wix DNS zone.
+# Steps and what each setting does: docs/hosting.md
+services:
+  - type: web
+    name: flow-with-mind
+    runtime: python
+    # free sleeps after 15 min idle and wakes in 20–60 s (22 s measured on story.birdview.hk); starter stays warm,
+    # which matters when the first person to open the link is already mid-trip. Change in the dashboard any time.
+    plan: starter
+    buildCommand: 'echo "stdlib only, nothing to install"'
+    startCommand: python scripts/serve_worlds.py --bind 0.0.0.0
+    autoDeploy: true
+    envVars:
+      - key: ALLOWED_HOSTS
+        value: flow.birdview.hk
+      - key: COOKIE_SECURE
+        value: "1"
+      - key: FLOW_INVITE
+        generateValue: true
+      - key: TYPESAFE_API_KEY
+        sync: false
