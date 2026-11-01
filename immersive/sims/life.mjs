@@ -11,22 +11,25 @@ export class Life {
     this.size = size; this.grid = new LifeGrid(size);
     this.pure = false; this.perturbations = 0; this.births = 0; this.generationsPerBeat = 4; this.density = 1;
     this.activity = 0;
+    // Activity compares with two generations ago, so blinkers and still lifes (period 1–2 ash) read as dead.
+    this.oneAgo = new Uint8Array(size * size); this.twoAgo = new Uint8Array(size * size);
     this.seed(seed);
   }
   state() { return [this.grid.cells, this.grid.age]; }
   get generation() { return this.grid.generation; }
-  seed(seed = 1) { this.random = seeded(seed); this.grid.seed(this.random); this.perturbations = 0; }
+  seed(seed = 1) { this.random = seeded(seed); this.grid.seed(this.random); this.perturbations = 0; this.resync(); }
+  resync() { this.oneAgo.set(this.grid.cells); this.twoAgo.set(this.grid.cells); }
   setParams({ H, T, D } = {}) {
     if (H !== undefined) this.births = Math.round(H * this.size * this.size / 400);
     if (T !== undefined) this.generationsPerBeat = 1 + Math.round(T * 6);
     if (D !== undefined) this.density = D;
   }
   step() {
+    this.twoAgo.set(this.oneAgo); this.oneAgo.set(this.grid.cells);
     this.grid.step();
-    // After a step the grid's spare buffer still holds the previous generation.
-    const cells = this.grid.cells, previous = this.grid.next;
+    const cells = this.grid.cells, before = this.twoAgo;
     let changed = 0, population = 0;
-    for (let i = 0; i < cells.length; i++) { if (cells[i] !== previous[i]) changed++; population += cells[i]; }
+    for (let i = 0; i < cells.length; i++) { if (cells[i] !== before[i]) changed++; population += cells[i]; }
     this.activity = changed / Math.max(1, population);
     if (this.pure || !this.births) return;
     const n = cells.length;

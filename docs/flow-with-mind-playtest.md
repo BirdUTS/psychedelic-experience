@@ -1,5 +1,23 @@
 # Flow with Mind — how to start, what to try, what was tested
 
+## v3.5 (2026-11-01): nothing stays dead — Life's ash now counts as dead
+
+Bird: "will it go static if left long? Life stabilises." The metabolism (v2) was there — liveliness below 0.35 for 5 s heats the world, below 0.2 for 15 s more rewinds it (pure Life reseeds) — but a 10-minute silent run found a gap: pure Life settled into blinkers and still lifes by ~100 s, and because its activity compared each generation with the one before, a blinker counted as change; liveliness sat at 0.40, just above the trigger, for the rest of the run. Life now compares with **two generations ago**, so period-1 and period-2 ash reads as dead (a glider and a fresh soup still read as alive; test added).
+
+10-minute silent runs, each world locked, no music:
+
+| World | Lowest liveliness | Time below 0.2 | Longest dead stretch | What brought it back |
+|---|---|---|---|---|
+| Life, pure B3/S23 | 0 | 102 s | 20 s | 5 reseeds |
+| Life, creative variant | 0.83 | 0 s | — | never died (random births every step) |
+| Mycelium | 0.15 | 31 s | 5 s | heat, every time |
+| Fireflies | 0.69 | 0 s | — | never died |
+| Fish | 0.62 | 0 s | — | never died |
+
+Unlocked, the arc also moves to another world every couple of minutes. Cache `extra-worlds-v14`.
+
+---
+
 ## v3.4 (2026-11-01): JEV you can feel
 
 Bird: "JEV has no reaction at all — what can it change?" Causes: no server was running (the page opened from the offline cache, JEV's requests had nowhere to go, the failure was written only in the drawer while the HUD still said `JEV`); and when it did answer, its changes were hidden — scene changes were blocked while you spoke (talking makes the world follow), the fold it chose was zeroed by the clean shots, palette and mood waited for a phrase, and nothing on screen said what it had decided.
