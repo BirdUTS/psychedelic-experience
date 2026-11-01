@@ -1,6 +1,7 @@
 #!/bin/bash
-# Flow with Mind — one click: start the local server (JEV works only here; the key stays on this Mac)
-# and open the app in Chrome. Ctrl+C (or closing the window) stops the server.
+# Flow with Mind — one click: start the local server (loopback, no gate; the JEV key comes from TYPESAFE_API_KEY
+# or the AI Lab .env) and open the app in Chrome. Ctrl+C (or closing the window) stops the server.
+# The hosted copy with the same server lives at https://flow.birdview.hk (docs/hosting.md).
 cd "$(dirname "$0")/.." || exit 1
 PORT=${1:-8766}
 URL() { echo "http://127.0.0.1:$1/immersive/"; }

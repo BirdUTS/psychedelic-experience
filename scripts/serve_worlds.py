@@ -1,18 +1,32 @@
-"""Local static app + bounded server-side JEV bridge. Stdlib only. Never serves hidden files.
+"""Static app + bounded server-side JEV bridge. Stdlib only. Never serves hidden files.
 
 JEV (TypeSafe System One) answers eight bounded questions about the current state and returns a
 decision in a fixed vocabulary; the browser treats it as soft targets. The API key is read here only.
+
+Two ways to run it (docs/hosting.md). Locally, no environment: loopback, no gate, JEV key from
+TYPESAFE_API_KEY or the AI Lab .env. Hosted (Render, flow.birdview.hk): --bind 0.0.0.0 with
+ALLOWED_HOSTS and FLOW_INVITE set; the whole site then opens only from the invite link (?k=TOKEN),
+which plants an HttpOnly cookie and redirects to the clean URL. The same pattern as Story Stage.
 """
-import argparse, json, os, sys
+import argparse, hashlib, hmac, json, os, secrets, sys
 from pathlib import Path
+from http.cookies import CookieError, SimpleCookie
 from http.server import ThreadingHTTPServer, SimpleHTTPRequestHandler
-from urllib.parse import urlparse, unquote
+from urllib.parse import urlparse, unquote, parse_qs
 from urllib import request as urlrequest, error as urlerror
 
 ROOT = Path(__file__).resolve().parents[1]
 JEV_URL = 'https://api.typesafe.ai/v1/systemone'
 JEV_MODEL = 'jev-latest'
 ENV_FALLBACK = Path('/Users/waiwingtang/Projects/Multimedia AI Lab/.env')
+INVITE_COOKIE = 'flow_invite'
+INVITE_COOKIE_MAX_AGE = 365 * 24 * 3600
+LOOPBACK = ('127.0.0.1', 'localhost', '::1')
+REFUSED_PAGE = ('<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">'
+                '<title>Flow with Mind</title><style>html{height:100%;background:#000;color:#b9b4a8;font:17px/1.7 system-ui,sans-serif}'
+                'body{height:100%;margin:0;display:grid;place-items:center}p{max-width:24em;padding:0 1.2em;text-align:center}</style>'
+                '<p>This page opens from an invite link.<br>Ask the person hosting tonight for it.<br>'
+                '<span lang="zh-HK">呢頁要用邀請 link 先開到，問返今晚開場嘅人攞。</span></p>').encode()
 
 SCENES = ['physarum', 'swarm', 'boids', 'life']
 PALETTES = ['ink', 'silk', 'ember', 'neon']
@@ -60,6 +74,59 @@ def load_key():
     except OSError:
         pass
     return None
+
+
+def env(name):
+    return os.environ.get(name, '').strip()
+
+
+def invite_token():
+    """FLOW_INVITE: the token the invite link carries (?k=TOKEN). Set, the whole site is gated; unset, it is open for local use."""
+    return env('FLOW_INVITE')
+
+
+def gate_enabled():
+    return bool(invite_token())
+
+
+def allowed_hosts(port):
+    """Hosts this server answers to: ALLOWED_HOSTS (comma-separated) plus Render's own hostname; else loopback on the bound port."""
+    hosts = {h.strip().lower() for h in env('ALLOWED_HOSTS').split(',') if h.strip()}
+    if env('RENDER_EXTERNAL_HOSTNAME'):
+        hosts.add(env('RENDER_EXTERNAL_HOSTNAME').lower())
+    return hosts or {f'127.0.0.1:{port}', f'localhost:{port}'}
+
+
+def invite_ok(candidate):
+    token = invite_token()
+    return bool(token) and isinstance(candidate, str) and secrets.compare_digest(candidate.encode(), token.encode())
+
+
+def invite_cookie_value():
+    """Derived from the token, so a leaked cookie does not hand out the shareable link."""
+    return hmac.new(invite_token().encode(), b'flow-invite', hashlib.sha256).hexdigest()
+
+
+def cookie_admits(cookie_header):
+    if not gate_enabled() or not cookie_header:
+        return False
+    jar = SimpleCookie()
+    try:
+        jar.load(cookie_header)
+    except CookieError:
+        return False
+    morsel = jar.get(INVITE_COOKIE)
+    return bool(morsel) and hmac.compare_digest(morsel.value, invite_cookie_value())
+
+
+def check_public_config(bind):
+    """Refuse a public interface unless the hosted settings are in place (as Story Stage does)."""
+    if bind in LOOPBACK:
+        return
+    if not env('ALLOWED_HOSTS'):
+        raise SystemExit('Set ALLOWED_HOSTS (comma-separated host[:port]) to serve on a public interface.')
+    if not invite_token():
+        raise SystemExit('Set FLOW_INVITE (the token in the invite link, ?k=TOKEN) to serve on a public interface.')
 
 
 def number(value, low, high):
@@ -210,31 +277,94 @@ class Handler(SimpleHTTPRequestHandler):
         if args and isinstance(args[0], str) and '/api/' in args[0]:   # send_error passes an HTTPStatus first
             super().log_message(fmt, *args)
 
-    def do_GET(self):
+    def secure(self):
+        headers = getattr(self, 'headers', None)
+        return bool(headers) and headers.get('X-Forwarded-Proto', '').lower() == 'https' or env('COOKIE_SECURE') == '1'
+
+    def host_allowed(self):
+        return (self.headers.get('Host') or '').lower() in allowed_hosts(self.server.server_address[1])
+
+    def admitted(self):
+        """Host check, then the invite gate. Answers the request itself (302 or 403) and returns False when it did."""
+        if not self.host_allowed():
+            self.refuse(); return False
+        url = urlparse(self.path)
+        landing = '/immersive/' if url.path == '/' else None
+        if gate_enabled():
+            k = parse_qs(url.query).get('k')
+            if k is not None:
+                if not invite_ok(k[0]):
+                    self.refuse(); return False
+                cookie = (f'{INVITE_COOKIE}={invite_cookie_value()}; Path=/; HttpOnly; SameSite=Lax; Max-Age={INVITE_COOKIE_MAX_AGE}'
+                          + ('; Secure' if self.secure() else ''))
+                self.redirect(landing or url.path, cookie); return False
+            if not cookie_admits(self.headers.get('Cookie')):
+                self.refuse(); return False
+        if landing:
+            self.redirect(landing); return False
+        return True
+
+    def hidden(self):
         path = Path(unquote(urlparse(self.path).path))
-        if any(p.startswith('.') for p in path.parts) or path.suffix in ('.py', '.cjs') or path.parts[1:2] == ('scripts',):
+        return any(p.startswith('.') for p in path.parts) or path.suffix in ('.py', '.cjs') or path.parts[1:2] == ('scripts',)
+
+    def do_GET(self):
+        if not self.admitted():
+            return
+        if self.hidden():
             self.send_error(404); return
         return super().do_GET()
+
+    def do_HEAD(self):
+        if not self.admitted():
+            return
+        if self.hidden():
+            self.send_error(404); return
+        return super().do_HEAD()
 
     def list_directory(self, path):
         self.send_error(404); return None
 
     def end_headers(self):
-        # Always revalidate app code during development; the service worker owns offline caching.
-        if self.command == 'GET' and not self.path.startswith('/music/'):
+        # Always revalidate app code; the service worker owns offline caching. Responses that set their own policy skip this.
+        if self.command in ('GET', 'HEAD') and not self.path.startswith('/music/') and not getattr(self, '_cache_set', False):
             self.send_header('Cache-Control', 'no-cache')
+        self.send_header('X-Content-Type-Options', 'nosniff')
+        self.send_header('Referrer-Policy', 'no-referrer')
+        if self.secure():
+            self.send_header('Strict-Transport-Security', 'max-age=31536000')
         super().end_headers()
 
     def respond(self, status, body, extra=None):
         data = json.dumps(body).encode()
         self.send_response(status)
         self.send_header('Content-Type', 'application/json'); self.send_header('Content-Length', str(len(data)))
-        self.send_header('Cache-Control', 'no-store')
+        self.send_header('Cache-Control', 'no-store'); self._cache_set = True
         for k, v in (extra or {}).items():
             self.send_header(k, v)
         self.end_headers(); self.wfile.write(data)
 
+    def redirect(self, location, cookie=None):
+        self.send_response(302)
+        self.send_header('Location', location); self.send_header('Content-Length', '0')
+        self.send_header('Cache-Control', 'no-store'); self._cache_set = True
+        if cookie:
+            self.send_header('Set-Cookie', cookie)
+        self.end_headers()
+
+    def refuse(self):
+        if self.command == 'POST':
+            self.respond(403, {'error': 'invite required'}); return
+        self.send_response(403)
+        self.send_header('Content-Type', 'text/html; charset=utf-8'); self.send_header('Content-Length', str(len(REFUSED_PAGE)))
+        self.send_header('Cache-Control', 'no-store'); self._cache_set = True
+        self.end_headers()
+        if self.command != 'HEAD':
+            self.wfile.write(REFUSED_PAGE)
+
     def do_POST(self):
+        if not self.admitted():
+            return
         if self.path != '/api/decide':
             self.send_error(404); return
         origin = self.headers.get('Origin')
@@ -271,9 +401,11 @@ class Handler(SimpleHTTPRequestHandler):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--port', type=int, default=int(os.environ.get('PORT', 8766)))
-    parser.add_argument('--bind', default='127.0.0.1')
+    parser.add_argument('--bind', default='127.0.0.1', help='0.0.0.0 on Render (needs ALLOWED_HOSTS and FLOW_INVITE)')
     a = parser.parse_args()
-    print(f'http://{a.bind}:{a.port}/immersive/', flush=True)
+    check_public_config(a.bind)
+    print(f'http://{a.bind}:{a.port}/immersive/  JEV key {"found" if load_key() else "missing"} · '
+          f'invite gate {"on" if gate_enabled() else "off"} · hosts {", ".join(sorted(allowed_hosts(a.port)))}', flush=True)
     ThreadingHTTPServer((a.bind, a.port), Handler).serve_forever()
 
 
