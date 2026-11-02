@@ -10,7 +10,7 @@ stdlib Python server, secrets typed in the Render dashboard, one CNAME in the Wi
 |---|---|---|
 | Static app (`/immersive/`) + `/api/decide` | Render web service `flow-with-mind`, `scripts/serve_worlds.py --bind 0.0.0.0` | one process, no database, no pip dependencies |
 | JEV key | Render → Environment → `TYPESAFE_API_KEY` | never in the repo, never sent to the browser |
-| Invite gate | Render → Environment → `FLOW_INVITE` (Bird's choice; a short passcode since 2026-11-02) | typed at the door on `https://flow.birdview.hk/`, or carried by the link `?k=<FLOW_INVITE>` |
+| Door | off: no `FLOW_PASSCODE` in Render → Environment (Bird's choice, 2026-11-02) | the address is enough; set `FLOW_PASSCODE` to put the door back (typed at `/`, or carried by `?k=<value>`) |
 | Domain | Wix DNS: CNAME `flow` → `flow-with-mind.onrender.com` | TLS is issued by Render once the CNAME resolves |
 | Static mirror without JEV | GitHub Pages, `https://birduts.github.io/psychedelic-experience/immersive/` | unchanged; shows `JEV OFFLINE` |
 | Local run | `start-flow.command` or `scripts/start-flow.sh` | loopback, no gate, key from the AI Lab `.env` |
@@ -30,7 +30,7 @@ Since v3.7 the page is the quiet glass: one line to begin, captions, no buttons.
 
 ## The gate
 
-`FLOW_INVITE` set → every request needs the cookie that one of two doors plants: the passcode door, or
+`FLOW_PASSCODE` set → every request needs the cookie that one of two doors plants: the passcode door, or
 `?k=<token>` on the URL. Anything without it answers 403 with the door page (`Flow with Mind`, one field `密碼`,
 one button `進入`, nothing else); `/api/decide` answers 403 JSON. The door POSTs the code to `/enter`; a correct code
 answers 302 to `/immersive/`, a wrong one the door again with `密碼不對。`. A correct `?k=` answers 302 to the same
@@ -38,8 +38,12 @@ path without the token (or to `/immersive/` from `/`). Both set `flow_invite` (H
 behind the TLS proxy, one year). The cookie value is an HMAC of the token, not the token, so a leaked cookie does
 not hand out the passcode. The door brakes: five wrong tries from one address (first `X-Forwarded-For` behind
 Render's proxy) or thirty from everyone together lock it for a minute, with `試得太多，稍後再試。` even for the right
-code. That makes a four-digit code a latch against passers-by and crawlers, not a lock against someone patient;
-Bird chose it with that said (2026-11-02), because typing a long token on a headset keyboard is not workable. A guest's phone or laptop
+code. That makes a four-digit code a latch against passers-by and crawlers, not a lock against someone patient.
+`FLOW_PASSCODE` unset → no door at all; anyone with the address is in. That is the live state since the evening of
+2026-11-02: Bird first asked for a four-digit code instead of the long invite token (typing it on a headset keyboard
+is not workable), then, when his Render edit did not take, for no passcode at all. The variable was renamed from
+`FLOW_INVITE` at that point so the site opened on deploy without another dashboard edit; a leftover `FLOW_INVITE` in
+Render is ignored and can be deleted. A guest's phone or laptop
 therefore opens the link once and is remembered for a year; the token never has to be typed.
 
 `ALLOWED_HOSTS` set → requests whose `Host` is not listed (plus Render's own `RENDER_EXTERNAL_HOSTNAME`) answer 403.
@@ -59,13 +63,12 @@ and `Strict-Transport-Security` behind HTTPS.
    and add that hostname to `ALLOWED_HOSTS` in Environment).
 4. Wix → Domains → `birdview.hk` → DNS records → add **CNAME**, host `flow`, value from step 3, TTL default.
    Same as the existing `story` record. Render verifies and issues the certificate within minutes.
-5. Service → **Environment** → set `FLOW_INVITE` to the passcode (Bird's call; four digits is what he wanted).
-   Tell guests the address and the code, or send `https://flow.birdview.hk/?k=<the code>` so they type nothing.
-6. Open the site once yourself and type the code: the HUD should show `JEV` (not `JEV OFFLINE`) after the first
-   decision.
+5. Nothing else: the site is open. To put a door up, Service → **Environment** → add `FLOW_PASSCODE` (four digits
+   is what Bird wanted), then tell guests the code or send `https://flow.birdview.hk/?k=<the code>`.
+6. Open the site once yourself: the HUD should show `JEV` (not `JEV OFFLINE`) after the first decision.
 
-To change the passcode: Environment → `FLOW_INVITE` → edit → save (Render redeploys, a minute or two down). Every
-cookie stops working at once, so every device meets the door again, including your own; type the new code. To take the site down: suspend the service in Render; the GitHub Pages mirror keeps working without JEV.
+To change or drop the passcode: Environment → `FLOW_PASSCODE` → edit or delete → save (Render redeploys, a minute
+or two down). Every cookie stops working at once, so every device meets the door again, including your own. To take the site down: suspend the service in Render; the GitHub Pages mirror keeps working without JEV.
 
 ## Done on 2026-11-01
 
@@ -83,7 +86,7 @@ Render account.
 start-up refusal. A local rehearsal of the hosted mode:
 
 ```bash
-ALLOWED_HOSTS=localhost:8766 FLOW_INVITE=rehearsal python3 scripts/serve_worlds.py --bind 0.0.0.0
+ALLOWED_HOSTS=localhost:8766 FLOW_PASSCODE=rehearsal python3 scripts/serve_worlds.py --bind 0.0.0.0
 ```
 
 then `http://localhost:8766/?k=rehearsal` opens the app and `http://localhost:8766/immersive/` in a private window

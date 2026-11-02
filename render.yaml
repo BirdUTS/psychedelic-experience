@@ -26,7 +26,7 @@ services:
         value: flow.birdview.hk
       - key: COOKIE_SECURE
         value: "1"
-      - key: FLOW_INVITE
-        generateValue: true
+      # No passcode by default (Bird, 2026-11-02): the address is enough. To put the door back, add FLOW_PASSCODE in
+      # the dashboard (any value; the door asks for it, the link ?k=<value> carries it). An old FLOW_INVITE there is ignored.
       - key: TYPESAFE_API_KEY
         sync: false

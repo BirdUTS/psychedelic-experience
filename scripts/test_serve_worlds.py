@@ -70,7 +70,7 @@ class ServeWorlds(unittest.TestCase):
 
 
 TOKEN = 'test-invite-token-0123456789'
-HOSTED_KEYS = ('FLOW_INVITE', 'ALLOWED_HOSTS', 'COOKIE_SECURE', 'RENDER_EXTERNAL_HOSTNAME')
+HOSTED_KEYS = ('FLOW_PASSCODE', 'ALLOWED_HOSTS', 'COOKIE_SECURE', 'RENDER_EXTERNAL_HOSTNAME')
 
 
 @contextlib.contextmanager
@@ -117,7 +117,7 @@ class HostedMode(unittest.TestCase):
         self.assertEqual(status, 200)
 
     def test_gate_shows_a_visitor_without_the_invite_the_passcode_door(self):
-        with serving(FLOW_INVITE=TOKEN) as port:
+        with serving(FLOW_PASSCODE=TOKEN) as port:
             status, h, body = get(port, '/immersive/')
             api, _, _ = post(port, '/api/decide')
         self.assertEqual(status, 403); self.assertNotIn('set-cookie', h)
@@ -125,7 +125,7 @@ class HostedMode(unittest.TestCase):
         self.assertEqual(api, 403)
 
     def test_invite_link_sets_a_cookie_and_drops_the_token_from_the_url(self):
-        with serving(FLOW_INVITE=TOKEN) as port:
+        with serving(FLOW_PASSCODE=TOKEN) as port:
             status, h, _ = get(port, '/immersive/?k=' + TOKEN)
         self.assertEqual(status, 302); self.assertEqual(h['location'], '/immersive/')
         cookie = h['set-cookie']
@@ -136,12 +136,12 @@ class HostedMode(unittest.TestCase):
         self.assertNotIn('Secure', cookie)   # plain http on loopback
 
     def test_invite_link_on_the_root_lands_in_the_app(self):
-        with serving(FLOW_INVITE=TOKEN) as port:
+        with serving(FLOW_PASSCODE=TOKEN) as port:
             status, h, _ = get(port, '/?k=' + TOKEN)
         self.assertEqual(status, 302); self.assertEqual(h['location'], '/immersive/'); self.assertIn('set-cookie', h)
 
     def test_cookie_from_the_invite_opens_the_app_and_the_api(self):
-        with serving(FLOW_INVITE=TOKEN) as port:
+        with serving(FLOW_PASSCODE=TOKEN) as port:
             _, h, _ = get(port, '/immersive/?k=' + TOKEN)
             cookie = h['set-cookie'].split(';')[0]
             status, _, _ = get(port, '/immersive/', {'Cookie': cookie})
@@ -150,13 +150,13 @@ class HostedMode(unittest.TestCase):
         self.assertEqual(api, 400)   # past the gate, the usual request validation answers
 
     def test_wrong_or_stale_invite_is_refused(self):
-        with serving(FLOW_INVITE=TOKEN) as port:
+        with serving(FLOW_PASSCODE=TOKEN) as port:
             wrong, h, _ = get(port, '/immersive/?k=' + TOKEN[:-1])
             stale, _, _ = get(port, '/immersive/', {'Cookie': 'flow_invite=deadbeef'})
         self.assertEqual(wrong, 403); self.assertNotIn('set-cookie', h); self.assertEqual(stale, 403)
 
     def test_cookie_is_secure_behind_the_tls_proxy(self):
-        with serving(FLOW_INVITE=TOKEN) as port:
+        with serving(FLOW_PASSCODE=TOKEN) as port:
             _, h, _ = get(port, '/immersive/?k=' + TOKEN, {'X-Forwarded-Proto': 'https'})
         self.assertIn('Secure', h['set-cookie'])
         self.assertIn('strict-transport-security', h)
@@ -184,16 +184,21 @@ class HostedMode(unittest.TestCase):
             _, h, _ = get(port, '/immersive/')
         self.assertEqual(h.get('x-content-type-options'), 'nosniff'); self.assertEqual(h.get('referrer-policy'), 'no-referrer')
 
-    def test_public_bind_refuses_to_start_without_hosts_and_invite(self):
-        with mock.patch.dict(os.environ, {'ALLOWED_HOSTS': '', 'FLOW_INVITE': ''}):
+    def test_public_bind_needs_hosts_but_opens_without_a_passcode(self):
+        with mock.patch.dict(os.environ, {'ALLOWED_HOSTS': '', 'FLOW_PASSCODE': ''}):
             sw.check_public_config('127.0.0.1')   # loopback never needs them
             with self.assertRaises(SystemExit):
                 sw.check_public_config('0.0.0.0')
-        with mock.patch.dict(os.environ, {'ALLOWED_HOSTS': 'flow.birdview.hk', 'FLOW_INVITE': ''}):
-            with self.assertRaises(SystemExit):
-                sw.check_public_config('0.0.0.0')
-        with mock.patch.dict(os.environ, {'ALLOWED_HOSTS': 'flow.birdview.hk', 'FLOW_INVITE': TOKEN}):
+        with mock.patch.dict(os.environ, {'ALLOWED_HOSTS': 'flow.birdview.hk', 'FLOW_PASSCODE': ''}):
+            sw.check_public_config('0.0.0.0')     # Bird's choice (2026-11-02): no passcode, the address is enough
+            self.assertFalse(sw.gate_enabled())
+        with mock.patch.dict(os.environ, {'ALLOWED_HOSTS': 'flow.birdview.hk', 'FLOW_PASSCODE': TOKEN}):
             sw.check_public_config('0.0.0.0')
+            self.assertTrue(sw.gate_enabled())
+
+    def test_the_old_invite_variable_no_longer_gates_anything(self):
+        with mock.patch.dict(os.environ, {'FLOW_INVITE': TOKEN, 'FLOW_PASSCODE': ''}):
+            self.assertFalse(sw.gate_enabled())
 
 
 if __name__ == '__main__':
@@ -246,7 +251,7 @@ class StatusPage(unittest.TestCase):
         self.assertIn('502', body.decode())
 
     def test_status_page_stays_behind_the_invite_gate(self):
-        with mock.patch.object(sw, 'ask_jev') as asked, serving(FLOW_INVITE=TOKEN) as port:
+        with mock.patch.object(sw, 'ask_jev') as asked, serving(FLOW_PASSCODE=TOKEN) as port:
             status, _, _ = get(port, '/api/decide')
         self.assertEqual(status, 403)
         asked.assert_not_called()
@@ -269,7 +274,7 @@ class Door(unittest.TestCase):
         sw.door_reset()
 
     def test_the_right_passcode_plants_the_invite_cookie_and_enters(self):
-        with serving(FLOW_INVITE='1111') as port:
+        with serving(FLOW_PASSCODE='1111') as port:
             status, h, _ = knock(port, '1111')
             _, link_h, _ = get(port, '/?k=1111')
             opened, _, _ = get(port, '/immersive/', {'Cookie': h['set-cookie'].split(';')[0]})
@@ -278,14 +283,14 @@ class Door(unittest.TestCase):
         self.assertEqual(opened, 200)
 
     def test_a_wrong_passcode_says_so_and_plants_nothing(self):
-        with serving(FLOW_INVITE='1111') as port:
+        with serving(FLOW_PASSCODE='1111') as port:
             status, h, body = knock(port, '1112')
         self.assertEqual(status, 403); self.assertNotIn('set-cookie', h)
         self.assertIn('不對'.encode(), body); self.assertIn(b'name="code"', body)
 
     def test_five_wrong_passcodes_lock_that_visitor_out_for_a_minute(self):
         clock = mock.Mock(return_value=1000.0)
-        with mock.patch.object(sw, 'DOOR_CLOCK', clock), serving(FLOW_INVITE='1111') as port:
+        with mock.patch.object(sw, 'DOOR_CLOCK', clock), serving(FLOW_PASSCODE='1111') as port:
             for _ in range(5):
                 knock(port, '0000')
             locked, h, body = knock(port, '1111')
@@ -295,7 +300,7 @@ class Door(unittest.TestCase):
         self.assertEqual(later, 302)
 
     def test_visitors_are_told_apart_by_x_forwarded_for_behind_the_proxy(self):
-        with serving(FLOW_INVITE='1111') as port:
+        with serving(FLOW_PASSCODE='1111') as port:
             for _ in range(5):
                 knock(port, '0000', ip='203.0.113.9')
             other, _, _ = knock(port, '1111', ip='203.0.113.10')
@@ -303,7 +308,7 @@ class Door(unittest.TestCase):
         self.assertEqual(other, 302); self.assertEqual(same, 403)
 
     def test_many_wrong_passcodes_from_everywhere_lock_the_door_for_everyone(self):
-        with serving(FLOW_INVITE='1111') as port:
+        with serving(FLOW_PASSCODE='1111') as port:
             for i in range(sw.DOOR_TRIES_ALL):
                 knock(port, '0000', ip=f'198.51.100.{i}')
             fresh, _, _ = knock(port, '1111', ip='192.0.2.1')

@@ -3,12 +3,11 @@
 JEV (TypeSafe System One) answers eight bounded questions about the current state and returns a
 decision in a fixed vocabulary; the browser treats it as soft targets. The API key is read here only.
 
-Two ways to run it (docs/hosting.md). Locally, no environment: loopback, no gate, JEV key from
-TYPESAFE_API_KEY or the AI Lab .env. Hosted (Render, flow.birdview.hk): --bind 0.0.0.0 with
-ALLOWED_HOSTS and FLOW_INVITE set; the whole site then opens only from the invite link (?k=TOKEN) or by
-typing that same token at the passcode door (POST /enter); either plants an HttpOnly cookie and redirects to
-the clean URL. The link half is the same pattern as Story Stage; the door exists for devices where typing a
-link is a chore (a headset), and it brakes after a few wrong tries.
+Two ways to run it (docs/hosting.md). Locally, no environment: loopback, no door, JEV key from
+TYPESAFE_API_KEY or the AI Lab .env. Hosted (Render, flow.birdview.hk): --bind 0.0.0.0 with ALLOWED_HOSTS set.
+The site is open unless FLOW_PASSCODE is also set (Bird's choice, 2026-11-02: the address is enough); with it, the
+whole site opens only by typing the passcode at the door (POST /enter) or from the link that carries it (?k=CODE);
+either plants an HttpOnly cookie and redirects to the clean URL. The door brakes after a few wrong tries.
 """
 import argparse, hashlib, hmac, html, json, os, secrets, sys, time
 from pathlib import Path
@@ -33,7 +32,7 @@ DOOR_STYLE = ('html{height:100%;background:#05070c;color:#e8e6df;font:18px/1.7 s
 
 
 def door_page(message=''):
-    """The page behind the gate: one passcode field. The passcode is FLOW_INVITE, the same token the invite link carries."""
+    """The page behind the gate: one passcode field. The passcode is FLOW_PASSCODE, the same value the ?k= link carries."""
     note = f'<p>{html.escape(message)}</p>' if message else ''
     return ('<!doctype html><html lang="zh-Hant"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">'
             f'<title>Flow with Mind</title><style>{DOOR_STYLE}</style><body><form method="post" action="/enter"><p>Flow with Mind</p>'
@@ -122,8 +121,8 @@ def env(name):
 
 
 def invite_token():
-    """FLOW_INVITE: the token the invite link carries (?k=TOKEN). Set, the whole site is gated; unset, it is open for local use."""
-    return env('FLOW_INVITE')
+    """FLOW_PASSCODE: typed at the door or carried by the link (?k=CODE). Set, the whole site is gated; unset, it is open."""
+    return env('FLOW_PASSCODE')
 
 
 def gate_enabled():
@@ -161,13 +160,11 @@ def cookie_admits(cookie_header):
 
 
 def check_public_config(bind):
-    """Refuse a public interface unless the hosted settings are in place (as Story Stage does)."""
+    """Refuse a public interface without a host list. A passcode is optional: without one the site is open."""
     if bind in LOOPBACK:
         return
     if not env('ALLOWED_HOSTS'):
         raise SystemExit('Set ALLOWED_HOSTS (comma-separated host[:port]) to serve on a public interface.')
-    if not invite_token():
-        raise SystemExit('Set FLOW_INVITE (the token in the invite link, ?k=TOKEN) to serve on a public interface.')
 
 
 def number(value, low, high):
@@ -511,11 +508,11 @@ class Handler(SimpleHTTPRequestHandler):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--port', type=int, default=int(os.environ.get('PORT', 8766)))
-    parser.add_argument('--bind', default='127.0.0.1', help='0.0.0.0 on Render (needs ALLOWED_HOSTS and FLOW_INVITE)')
+    parser.add_argument('--bind', default='127.0.0.1', help='0.0.0.0 on Render (needs ALLOWED_HOSTS; FLOW_PASSCODE optional)')
     a = parser.parse_args()
     check_public_config(a.bind)
     print(f'http://{a.bind}:{a.port}/immersive/  JEV key {"found" if load_key() else "missing"} · '
-          f'invite gate {"on" if gate_enabled() else "off"} · hosts {", ".join(sorted(allowed_hosts(a.port)))}', flush=True)
+          f'door {"on" if gate_enabled() else "off, open to all"} · hosts {", ".join(sorted(allowed_hosts(a.port)))}', flush=True)
     ThreadingHTTPServer((a.bind, a.port), Handler).serve_forever()
 
 

@@ -15,7 +15,7 @@
       "name": "door",
       "runtimeExecutable": "env",
       "runtimeArgs": [
-        "FLOW_INVITE=1111",
+        "FLOW_PASSCODE=1111",
         "python3",
         "scripts/serve_worlds.py",
         "--port",
