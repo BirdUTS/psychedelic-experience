@@ -25,3 +25,7 @@ export class GripHold {
     return null;
   }
 }
+
+/* ?folds=K (2026-11-03, a load test before any VR kaleidoscope is built): in VR the world is drawn K times, each copy
+   turned 1/K around the viewer, so the frame line after leaving says what the headset can carry. Whole, 1..8. */
+export function foldCount(value) { const n = Math.floor(Number(value)); return Number.isFinite(n) && n > 1 ? Math.min(8, n) : 1; }

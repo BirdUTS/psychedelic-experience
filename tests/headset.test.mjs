@@ -28,3 +28,9 @@ test('a short squeeze is music; a squeeze held one second is leave, once, with n
 test('a session end can swallow the release: reset clears a held grip so the next session works',()=>{
   const g=new GripHold();g.down(1,0);assert.equal(g.tick(1000),'leave');g.reset();g.down(0,5000);assert.equal(g.up(0,5200),'music');
 });
+
+import {foldCount} from '../immersive/engine/headset.mjs';
+test('the ?folds load test is 1 unless asked, whole, and never more than 8 (a headset must not be frozen by a typo)',()=>{
+  assert.equal(foldCount(null),1);assert.equal(foldCount(''),1);assert.equal(foldCount('4'),4);assert.equal(foldCount('100'),8);
+  assert.equal(foldCount('abc'),1);assert.equal(foldCount('0'),1);assert.equal(foldCount('2.7'),2);
+});

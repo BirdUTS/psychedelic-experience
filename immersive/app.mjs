@@ -27,14 +27,14 @@ import { Ship } from './engine/ship.mjs';
 import { depthToAxes } from './engine/depth.mjs';
 import { Gestures } from './engine/gestures.mjs';
 import { FrameMeter, frameLine } from './engine/frame-meter.mjs';
-import { headsetLine, triggerAction, nextWorld, GripHold } from './engine/headset.mjs';
+import { headsetLine, triggerAction, nextWorld, GripHold, foldCount } from './engine/headset.mjs';
 import { Worlds } from './worlds.mjs';
 import { talkLanguage, captionLanguage, line as captionLine, worldName, decisionCaption } from './engine/captions.mjs';
 
 const $ = id => document.getElementById(id), RAD = Math.PI / 180;
 // The quiet glass (v4 step 1): a guest sees the picture, one line to begin, and captions; nothing to set. ?dev keeps
 // the old dashboard, the ring, the HUD and the keyboard for checking the engine.
-const PARAMS = new URLSearchParams(location.search), DEV = PARAMS.has('dev'), QUIET = !DEV;
+const PARAMS = new URLSearchParams(location.search), DEV = PARAMS.has('dev'), QUIET = !DEV, VR_FOLDS = foldCount(PARAMS.get('folds'));
 document.body.classList.toggle('quiet', QUIET);
 let capLang = captionLanguage(navigator.language), captionsMode = 'all', grounded = false, started = !QUIET, soundSource = 'mic', lastSpoken = -Infinity, hintAt = Infinity, hintIndex = 0;
 const WORLDS = {
@@ -716,7 +716,15 @@ function frame(dt) {
       if (Math.abs(camera.fov - pose.fov) > 0.05) { camera.fov += (pose.fov - camera.fov) * k; camera.updateProjectionMatrix(); }
     }
   }
-  if (renderer.xr.isPresenting) renderer.render(scene, camera);
+  if (renderer.xr.isPresenting) {
+    renderer.render(scene, camera);
+    // ?folds=K load test: the same world K times, turned around the viewer, added on top; the frame meter reads the cost.
+    if (VR_FOLDS > 1) {
+      const y = group.rotation.y; renderer.autoClear = false;
+      for (let k = 1; k < VR_FOLDS; k++) { group.rotation.y = y + k * Math.PI * 2 / VR_FOLDS; renderer.render(scene, camera); }
+      renderer.autoClear = true; group.rotation.y = y;
+    }
+  }
   else {
     // v3: the director's state becomes a program (grammar), blended over time; gestures speak on top of it.
     const beatSeconds = 60 / Math.max(60, out.hud.bpm);
