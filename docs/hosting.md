@@ -34,7 +34,9 @@ and begins in one touch (since 2026-11-03). Notes in `docs/flow-with-mind-playte
 `FLOW_PASSCODE` set → every request needs the cookie that one of two doors plants: the passcode door, or
 `?k=<token>` on the URL. Anything without it answers 403 with the door page (`Flow with Mind`, one field `密碼`,
 one button `進入`, nothing else); `/api/decide` answers 403 JSON. The door POSTs the code to `/enter`; a correct code
-answers 302 to `/immersive/`, a wrong one the door again with `密碼不對。`. A correct `?k=` answers 302 to the same
+answers 302 to `/immersive/`, a wrong one the door again with `密碼不對。`. A `GET` of `/enter` answers 302 to `/immersive/`
+(a browser that once typed a code autocompletes that address; Bird's Quest met a 404 there on 2026-11-03), where the door
+shows if one is up. A correct `?k=` answers 302 to the same
 path without the token (or to `/immersive/` from `/`). Both set `flow_invite` (HttpOnly, SameSite=Lax, Secure
 behind the TLS proxy, one year). The cookie value is an HMAC of the token, not the token, so a leaked cookie does
 not hand out the passcode. The door brakes: five wrong tries from one address (first `X-Forwarded-For` behind

@@ -29,3 +29,21 @@ export class GripHold {
 /* ?folds=K (2026-11-03, a load test before any VR kaleidoscope is built): in VR the world is drawn K times, each copy
    turned 1/K around the viewer, so the frame line after leaving says what the headset can carry. Whole, 1..8. */
 export function foldCount(value) { const n = Math.floor(Number(value)); return Number.isFinite(n) && n > 1 ? Math.min(8, n) : 1; }
+
+/* 帶我回來 in a headset without a button (Bird, 2026-11-03: "find a place, the sky or the ground, to walk back out"):
+   look down at your feet. A ring appears there and closes over two seconds; keep looking and the session ends,
+   back to the glass. Works with hands, controllers or neither. The ground, not the sky: people look up to enjoy
+   a world, and nobody stares at an empty floor unless they want out. Pure: the y of the view direction
+   (-1 is straight down; -0.75 is about 49° below the horizon) and a clock in ms. */
+export class LookDown {
+  constructor({ dwellMs = 2000, downY = -0.75 } = {}) { this.dwellMs = dwellMs; this.downY = downY; this.reset(); }
+  reset() { this.since = null; this.fired = false; }
+  tick(dirY, t) {
+    if (!(dirY <= this.downY)) { this.since = null; this.fired = false; return { progress: 0, leave: false }; }
+    if (this.since === null) this.since = t;
+    const progress = Math.min(1, (t - this.since) / this.dwellMs);
+    const leave = progress >= 1 && !this.fired;
+    if (leave) this.fired = true;
+    return { progress, leave };
+  }
+}

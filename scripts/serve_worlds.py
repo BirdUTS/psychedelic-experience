@@ -389,6 +389,8 @@ class Handler(SimpleHTTPRequestHandler):
     def do_GET(self):
         if not self.admitted():
             return
+        if urlparse(self.path).path == '/enter':   # a remembered address (a browser autocompletes it): the glass, not 404
+            self.redirect('/immersive/'); return
         if urlparse(self.path).path == '/api/decide':
             healthy, lines = status_check()
             self.page(200 if healthy else 503, status_page(healthy, lines)); return
@@ -407,6 +409,8 @@ class Handler(SimpleHTTPRequestHandler):
     def do_HEAD(self):
         if not self.admitted():
             return
+        if urlparse(self.path).path == '/enter':
+            self.redirect('/immersive/'); return
         if self.hidden():
             self.send_error(404); return
         return super().do_HEAD()

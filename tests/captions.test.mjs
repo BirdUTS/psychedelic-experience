@@ -13,7 +13,7 @@ test('captions are written Chinese for every Chinese ear, English otherwise',()=
 test('both languages carry the same lines, and the Chinese ones stay short',()=>{
   assert.deepEqual(Object.keys(LINES.zh).sort(),Object.keys(LINES.en).sort());
   for(const [k,v] of Object.entries(LINES.zh))assert.ok(v.length<=18,`${k}: ${v}`);
-  assert.equal(line('start','zh'),'輕觸開始');assert.equal(line('ground','zh'),'我在。慢慢來。');assert.equal(line('start','en'),'Tap to begin');assert.equal(line('vr','zh'),'進入 VR');assert.equal(line('vr','en'),'Enter VR');assert.equal(line('vrGrip','zh'),'輕握音樂 · 握住一秒回來');
+  assert.equal(line('start','zh'),'輕觸開始');assert.equal(line('ground','zh'),'我在。慢慢來。');assert.equal(line('start','en'),'Tap to begin');assert.equal(line('vr','zh'),'進入 VR');assert.equal(line('vr','en'),'Enter VR');assert.equal(line('vrGrip','zh'),'低頭兩秒回來 · 輕握音樂');assert.equal(line('vrGrip','en'),'Look down two seconds to come back · squeeze: music');
   assert.equal(line('no-such-line','zh'),'');
 });
 test('world names are two characters in Chinese and a word in English',()=>{

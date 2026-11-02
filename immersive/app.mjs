@@ -27,7 +27,7 @@ import { Ship } from './engine/ship.mjs';
 import { depthToAxes } from './engine/depth.mjs';
 import { Gestures } from './engine/gestures.mjs';
 import { FrameMeter, frameLine } from './engine/frame-meter.mjs';
-import { headsetLine, triggerAction, nextWorld, GripHold, foldCount } from './engine/headset.mjs';
+import { headsetLine, triggerAction, nextWorld, GripHold, foldCount, LookDown } from './engine/headset.mjs';
 import { Worlds } from './worlds.mjs';
 import { talkLanguage, captionLanguage, line as captionLine, worldName, decisionCaption } from './engine/captions.mjs';
 
@@ -427,6 +427,8 @@ function setLanguage(lang) {
 
 // ---------- sound sources ----------
 const player = $('player');
+let musicIssue = '';   // the name of a play() refusal, read out after a VR session (the Quest cannot show a console)
+player.addEventListener('playing', () => { musicIssue = ''; });
 player.addEventListener('play', async () => {
   try { await audio.startPlayer(); audio.setSynthetic(false); syntheticLabel(); $('audioStatus').textContent = 'Suno demo playing → analysed live' + (audio.micOn ? ' · room mic listening alongside' : '.'); }
   catch { player.pause(); $('audioStatus').textContent = 'The audio engine could not start. Press play again.'; }
@@ -436,7 +438,7 @@ player.addEventListener('error', () => { $('audioStatus').textContent = 'That tr
 function loadTrack(track, play) {
   if (!track) return;
   player.src = '../' + track.src; $('track').value = track.src;
-  if (play) Promise.all([audio.startPlayer(), player.play()]).catch(() => { $('audioStatus').textContent = 'Track selected. Press play.'; });
+  if (play) Promise.all([audio.startPlayer(), player.play()]).catch(e => { musicIssue = e?.name || 'error'; $('audioStatus').textContent = 'Track selected. Press play.'; });
 }
 async function tracks() {
   try {
@@ -652,7 +654,12 @@ function userState() {
 let lastHUD = 0, lastExplain = 0;
 function animate() {
   const raw = clock.getDelta(), dt = Math.min(raw, 0.1);
-  if (renderer.xr.isPresenting) { vrMeter.record(raw); if (grips.tick(performance.now()) === 'leave') xrSession?.end(); }
+  if (renderer.xr.isPresenting) {
+    vrMeter.record(raw);
+    const look = floorLook.tick(camera.getWorldDirection(lookDir).y, performance.now());   // the head pose three wrote last frame
+    showFeet(look.progress);
+    if (look.leave || grips.tick(performance.now()) === 'leave') xrSession?.end();
+  }
   if (raw > 0) fps += (1 / raw - fps) * 0.05;
   if (document.hidden && !renderer.xr.isPresenting) return;
   frame(dt);
@@ -838,9 +845,9 @@ async function enterVR() {
   if (xrSession) { await xrSession.end(); return false; }
   try { xrSession = await navigator.xr.requestSession('immersive-vr', { optionalFeatures: ['local-floor'] }); }
   catch { xrSession = null; $('vr').textContent = 'VR did not start, retry'; return false; }
-  vrMeter.reset(); grips.reset();
+  vrMeter.reset(); grips.reset(); floorLook.reset(); musicIssue = '';
   setShipMode('hover'); camera.position.set(0, 1.6, 0); camera.rotation.set(0, 0, 0); await renderer.xr.setSession(xrSession); $('vr').textContent = 'Leave VR'; showVrLine();
-  xrSession.addEventListener('end', () => { xrSession = null; const ran = frameLine(vrMeter.summary(), capLang); $('vr').textContent = ran ? 'Enter Quest VR · ' + ran : 'Enter Quest VR'; if (ran) { $('decision').textContent = ran; caption(ran, 8, { essential: true }); } camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); showVrLine(); });
+  xrSession.addEventListener('end', () => { xrSession = null; feet.visible = false; const ran = [frameLine(vrMeter.summary(), capLang), musicIssue && `${capLang === 'zh' ? '音樂未播' : 'music did not play'} ${musicIssue}`].filter(Boolean).join(' · '); $('vr').textContent = ran ? 'Enter Quest VR · ' + ran : 'Enter Quest VR'; if (ran) { $('decision').textContent = ran; caption(ran, 8, { essential: true }); } camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); showVrLine(); });
   return true;
 }
 async function setupXR() {
@@ -850,13 +857,28 @@ async function setupXR() {
   } catch { $('vr').textContent = 'VR unavailable'; }
 }
 setupXR();
-// 進入 VR on the glass: the session first (it needs the touch), then the same beginning as 輕觸開始 minus fullscreen,
-// and the built-in music unless a source was already chosen; the room mic stays open alongside (Bird, 2026-11-03).
-$('vrLine').addEventListener('click', async () => {
-  if (!await enterVR()) return;
+// 進入 VR on the glass: the session request, the beginning (as 輕觸開始 minus fullscreen) and the built-in music all
+// start inside the touch itself, before anything is awaited: on the first Quest run the music, started only after
+// the session had come up, never played (Bird, 2026-11-03). The ear opens first, so it reads 'mic' and asks for the
+// room mic, which stays open alongside the music; a play() refusal is kept and read out after the session.
+$('vrLine').addEventListener('click', () => {
+  const entering = enterVR();
   if (!started) begin({ fullscreen: false });
   if (soundSource === 'mic') setSoundSource('demo');
+  entering.catch(() => {});
 });
+// 帶我回來 without a button: look down at your feet for two seconds. A ring closes there while you look; it is a
+// scene object, so the folds draw it too, and it ignores depth and fog so no world can hide it.
+const floorLook = new LookDown(), lookDir = new THREE.Vector3();
+const feet = new THREE.Mesh(new THREE.RingGeometry(0.26, 0.34, 48), new THREE.MeshBasicMaterial({ color: 0xecf1ed, transparent: true, opacity: 0, depthTest: false, depthWrite: false, fog: false, side: THREE.DoubleSide }));
+feet.rotation.x = -Math.PI / 2; feet.renderOrder = 10; feet.visible = false; scene.add(feet);
+function showFeet(progress) {
+  feet.visible = progress > 0;
+  if (!feet.visible) return;
+  feet.position.set(camera.position.x, camera.position.y - 1.5, camera.position.z);
+  feet.material.opacity = 0.25 + 0.75 * progress; feet.scale.setScalar(1.6 - 0.9 * progress);
+}
+window.__flow.lookDown = { tick: () => floorLook.tick(camera.getWorldDirection(lookDir).y, performance.now()), show: showFeet, feet };   // checks
 // In VR there is no glass to touch: the left trigger jumps to the next world at once, the right one flies or hovers;
 // a short squeeze of either grip starts or stops the built-in music; a grip held one second leaves VR (帶我回來).
 const grips = new GripHold();

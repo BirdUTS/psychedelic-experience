@@ -34,3 +34,24 @@ test('the ?folds load test is 1 unless asked, whole, and never more than 8 (a he
   assert.equal(foldCount(null),1);assert.equal(foldCount(''),1);assert.equal(foldCount('4'),4);assert.equal(foldCount('100'),8);
   assert.equal(foldCount('abc'),1);assert.equal(foldCount('0'),1);assert.equal(foldCount('2.7'),2);
 });
+
+import {LookDown} from '../immersive/engine/headset.mjs';
+test('looking down at your feet for two seconds leaves VR, once; a glance down does nothing',()=>{
+  const f=new LookDown();
+  assert.deepEqual(f.tick(0,0),{progress:0,leave:false},'looking ahead');
+  assert.deepEqual(f.tick(-0.9,1000),{progress:0,leave:false},'the first look down only starts the clock');
+  assert.equal(f.tick(-0.9,2000).progress,0.5,'half way: the ring is half closed');
+  assert.deepEqual(f.tick(-1,3000),{progress:1,leave:true},'two seconds: leave');
+  assert.deepEqual(f.tick(-1,3100),{progress:1,leave:false},'fires once');
+});
+test('looking up again resets the clock; a shallow look down (30°) and a missing pose never count',()=>{
+  const f=new LookDown();
+  f.tick(-0.9,0);f.tick(-0.9,1500);
+  assert.deepEqual(f.tick(-0.2,1600),{progress:0,leave:false},'looked up');
+  f.tick(-0.9,2000);assert.equal(f.tick(-0.9,3000).progress,0.5,'a fresh count');
+  assert.equal(f.tick(-0.5,5000).progress,0,'30° below the horizon is just looking at the world');
+  assert.equal(f.tick(NaN,6000).progress,0,'no pose yet is not a look down');
+});
+test('reset clears a look that a session end cut short, so the next session starts clean',()=>{
+  const f=new LookDown();f.tick(-1,0);f.tick(-1,2000);f.reset();assert.deepEqual(f.tick(-1,5000),{progress:0,leave:false});
+});

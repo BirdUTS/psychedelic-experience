@@ -314,6 +314,17 @@ class Door(unittest.TestCase):
             fresh, _, _ = knock(port, '1111', ip='192.0.2.1')
         self.assertEqual(fresh, 403)
 
+    def test_a_remembered_enter_address_goes_to_the_glass_instead_of_404(self):
+        # A browser that once typed a wrong code sits at /enter and autocompletes that address next time (Bird's Quest, 2026-11-03).
+        with serving() as port:
+            status, h, _ = get(port, '/enter')
+            head, hh, _ = call(port, 'HEAD', '/enter')
+        with serving(FLOW_PASSCODE='1111') as port:
+            gated, _, body = get(port, '/enter')
+        self.assertEqual(status, 302); self.assertEqual(h['location'], '/immersive/')
+        self.assertEqual(head, 302); self.assertEqual(hh['location'], '/immersive/')
+        self.assertEqual(gated, 403); self.assertIn(b'name="code"', body)   # with a door up, /enter is the door
+
     def test_the_door_with_the_gate_off_just_enters(self):
         with serving() as port:
             status, h, _ = knock(port, '1111')
