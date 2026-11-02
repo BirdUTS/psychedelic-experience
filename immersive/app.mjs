@@ -27,6 +27,7 @@ import { Ship } from './engine/ship.mjs';
 import { depthToAxes } from './engine/depth.mjs';
 import { Gestures } from './engine/gestures.mjs';
 import { FrameMeter, frameLine } from './engine/frame-meter.mjs';
+import { headsetLine, triggerAction, nextWorld } from './engine/headset.mjs';
 import { Worlds } from './worlds.mjs';
 import { talkLanguage, captionLanguage, line as captionLine, worldName, decisionCaption } from './engine/captions.mjs';
 
@@ -340,13 +341,13 @@ addEventListener('resize', () => { camera.aspect = innerWidth / innerHeight; cam
 // ---------- the quiet glass: begin, captions, bring me back, host panel ----------
 // One touch starts everything the browser needs a gesture for: fullscreen, sound, the ear (room mic + speech), and
 // the first caption. JEV switched itself on at load when a decision server answered the probe.
-function begin() {
+function begin({ fullscreen = true } = {}) {
   if (started) return;
   started = true; $('start').classList.add('gone'); document.body.classList.add('immersed'); touch();
   audio.resume();
   openEar();   // the words to say come only once the ear is really open (setTalk)
-  // Fullscreen may be refused (an embedded page); nothing waits on it.
-  if (!document.fullscreenElement) { try { document.documentElement.requestFullscreen({ navigationUI: 'hide' })?.catch?.(() => {}); } catch { /* no fullscreen here */ } }
+  // Fullscreen may be refused (an embedded page); nothing waits on it. A headset is already full.
+  if (fullscreen && !document.fullscreenElement) { try { document.documentElement.requestFullscreen({ navigationUI: 'hide' })?.catch?.(() => {}); } catch { /* no fullscreen here */ } }
 }
 // The ear opens in order: the room mic first (one permission prompt), Talk once that is granted — asking Chrome for
 // both at once leaves Talk refused. While the ear is shut, every tap asks again and the glass says so now and then.
@@ -822,25 +823,35 @@ $('offline').onclick = async () => {
   finally { clearTimeout(timer); port?.close(); $('offline').disabled = false; }
 };
 const vrMeter = new FrameMeter();
+let vrSupported = false;
+// The headset line on the glass (2026-11-03): shown where immersive VR runs, hidden while a session runs.
+function showVrLine() { $('vrLine').hidden = !QUIET || !headsetLine({ supported: vrSupported, presenting: !!xrSession }); }
+async function enterVR() {
+  if (xrSession) { await xrSession.end(); return false; }
+  try { xrSession = await navigator.xr.requestSession('immersive-vr', { optionalFeatures: ['local-floor'] }); }
+  catch { xrSession = null; $('vr').textContent = 'VR did not start, retry'; return false; }
+  vrMeter.reset();
+  setShipMode('hover'); camera.position.set(0, 1.6, 0); camera.rotation.set(0, 0, 0); await renderer.xr.setSession(xrSession); $('vr').textContent = 'Leave VR'; showVrLine();
+  xrSession.addEventListener('end', () => { xrSession = null; const ran = frameLine(vrMeter.summary(), capLang); $('vr').textContent = ran ? 'Enter Quest VR · ' + ran : 'Enter Quest VR'; if (ran) { $('decision').textContent = ran; caption(ran, 8, { essential: true }); } camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); showVrLine(); });
+  return true;
+}
 async function setupXR() {
   try {
     if (!navigator.xr || !await navigator.xr.isSessionSupported('immersive-vr')) { $('vr').textContent = 'VR: needs a headset'; return; }
-    $('vr').disabled = false; $('vr').textContent = 'Enter Quest VR';
-    $('vr').onclick = async () => {
-      if (xrSession) { await xrSession.end(); return; }
-      try {
-        xrSession = await navigator.xr.requestSession('immersive-vr', { optionalFeatures: ['local-floor'] });
-        vrMeter.reset();
-        setShipMode('hover'); camera.position.set(0, 1.6, 0); camera.rotation.set(0, 0, 0); await renderer.xr.setSession(xrSession); $('vr').textContent = 'Leave VR';
-        xrSession.addEventListener('end', () => { xrSession = null; const ran = frameLine(vrMeter.summary(), capLang); $('vr').textContent = ran ? 'Enter Quest VR · ' + ran : 'Enter Quest VR'; if (ran) { $('decision').textContent = ran; caption(ran, 8, { essential: true }); } camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); });
-      } catch { xrSession = null; $('vr').textContent = 'VR did not start, retry'; }
-    };
+    vrSupported = true; $('vr').disabled = false; $('vr').textContent = 'Enter Quest VR'; $('vr').onclick = () => enterVR(); showVrLine();
   } catch { $('vr').textContent = 'VR unavailable'; }
 }
 setupXR();
+// 進入 VR on the glass: the session first (it needs the touch), then the same beginning as 輕觸開始, minus fullscreen.
+$('vrLine').addEventListener('click', async () => { if (await enterVR() && !started) begin({ fullscreen: false }); });
+// In VR there is no glass to touch: the left trigger jumps to the next world at once, the right one flies or hovers.
 for (let i = 0; i < 2; i++) {
   const controller = renderer.xr.getController(i); scene.add(controller);
-  controller.addEventListener('selectstart', () => { gestureCount++; if (i === 0) act({ type: 'swipe', dir: 'left' }); else setShipMode(ship.mode === 'ship' ? 'hover' : 'ship'); });
+  controller.addEventListener('selectstart', () => {
+    gestureCount++; touch();
+    if (triggerAction(i) === 'world') { if (!jump) startJump(nextWorld(SCENES, world), { manual: true }); }
+    else setShipMode(ship.mode === 'ship' ? 'hover' : 'ship');
+  });
 }
 addEventListener('pagehide', () => { recognition?.stop(); player.pause(); audio.close(); renderer.setAnimationLoop(null); worlds.dispose(); post.dispose(); renderer.dispose(); });
 

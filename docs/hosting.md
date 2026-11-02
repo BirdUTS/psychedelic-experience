@@ -26,7 +26,8 @@ down for a minute or two.
 ## What a guest sees
 
 Since v3.7 the page is the quiet glass: one line to begin, captions, no buttons. The dashboard is at
-`https://flow.birdview.hk/immersive/?dev` for checking the engine (same cookie). Notes in `docs/flow-with-mind-playtest.md`.
+`https://flow.birdview.hk/immersive/?dev` for checking the engine. A Quest browser also sees a second line, 進入 VR, which enters WebXR
+and begins in one touch (since 2026-11-03). Notes in `docs/flow-with-mind-playtest.md`.
 
 ## The gate
 

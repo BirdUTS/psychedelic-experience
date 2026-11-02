@@ -1,5 +1,9 @@
 # Flow with Mind — how to start, what to try, what was tested
 
+## v3.8 (2026-11-03): the headset line
+
+On a browser that can run immersive VR (the Quest's), the glass shows a second line under 輕觸開始: 進入 VR (Enter VR). One touch asks for the session first (WebXR needs the touch), then begins exactly as 輕觸開始 does, minus fullscreen. The line sits at the foot of the glass between sessions and is gone while one runs, so leaving VR with the headset's own button and going back in needs no `?dev`. Phones and laptops never see it (`headsetLine` in `engine/headset.mjs`). In VR there is no glass to touch, so the triggers do its work: the left trigger jumps to the next world at once (the glass itself has no swipe; voice is not yet on the Quest), the right trigger flies or hovers. The dashboard's `Enter Quest VR` button shares the same path. Bird asked for this on 2026-11-03 after the open site showed him only the mycelium ball: the glass changes worlds by itself only every few minutes when nobody is touching, or by voice. Still unverified on a real headset: whether the mic prompt appears inside VR, how the worlds look from the centre (hover is built to be looked at from 19 units out; in VR you stand at the origin, inside the mycelium sphere), and the frame rate.
+
 ## v3.7 (2026-11-01): the quiet glass — nothing to set
 
 Bird, on the live link: "the UX is a mess, far too many buttons; make it as few as possible and immediately clear", then "written Chinese, as short as possible". This is v4's first step on the existing app, interface layer only (`index.html`, `style.css`, `app.mjs`, a new pure `engine/captions.mjs`); the engine is untouched.
