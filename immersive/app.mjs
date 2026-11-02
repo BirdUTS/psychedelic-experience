@@ -27,7 +27,7 @@ import { Ship } from './engine/ship.mjs';
 import { depthToAxes } from './engine/depth.mjs';
 import { Gestures } from './engine/gestures.mjs';
 import { FrameMeter, frameLine } from './engine/frame-meter.mjs';
-import { headsetLine, triggerAction, nextWorld } from './engine/headset.mjs';
+import { headsetLine, triggerAction, nextWorld, GripHold } from './engine/headset.mjs';
 import { Worlds } from './worlds.mjs';
 import { talkLanguage, captionLanguage, line as captionLine, worldName, decisionCaption } from './engine/captions.mjs';
 
@@ -652,7 +652,7 @@ function userState() {
 let lastHUD = 0, lastExplain = 0;
 function animate() {
   const raw = clock.getDelta(), dt = Math.min(raw, 0.1);
-  if (renderer.xr.isPresenting) vrMeter.record(raw);
+  if (renderer.xr.isPresenting) { vrMeter.record(raw); if (grips.tick(performance.now()) === 'leave') xrSession?.end(); }
   if (raw > 0) fps += (1 / raw - fps) * 0.05;
   if (document.hidden && !renderer.xr.isPresenting) return;
   frame(dt);
@@ -825,12 +825,12 @@ $('offline').onclick = async () => {
 const vrMeter = new FrameMeter();
 let vrSupported = false;
 // The headset line on the glass (2026-11-03): shown where immersive VR runs, hidden while a session runs.
-function showVrLine() { $('vrLine').hidden = !QUIET || !headsetLine({ supported: vrSupported, presenting: !!xrSession }); }
+function showVrLine() { $('vrEntry').hidden = !QUIET || !headsetLine({ supported: vrSupported, presenting: !!xrSession }); }
 async function enterVR() {
   if (xrSession) { await xrSession.end(); return false; }
   try { xrSession = await navigator.xr.requestSession('immersive-vr', { optionalFeatures: ['local-floor'] }); }
   catch { xrSession = null; $('vr').textContent = 'VR did not start, retry'; return false; }
-  vrMeter.reset();
+  vrMeter.reset(); grips.reset();
   setShipMode('hover'); camera.position.set(0, 1.6, 0); camera.rotation.set(0, 0, 0); await renderer.xr.setSession(xrSession); $('vr').textContent = 'Leave VR'; showVrLine();
   xrSession.addEventListener('end', () => { xrSession = null; const ran = frameLine(vrMeter.summary(), capLang); $('vr').textContent = ran ? 'Enter Quest VR · ' + ran : 'Enter Quest VR'; if (ran) { $('decision').textContent = ran; caption(ran, 8, { essential: true }); } camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); showVrLine(); });
   return true;
@@ -842,9 +842,20 @@ async function setupXR() {
   } catch { $('vr').textContent = 'VR unavailable'; }
 }
 setupXR();
-// 進入 VR on the glass: the session first (it needs the touch), then the same beginning as 輕觸開始, minus fullscreen.
-$('vrLine').addEventListener('click', async () => { if (await enterVR() && !started) begin({ fullscreen: false }); });
-// In VR there is no glass to touch: the left trigger jumps to the next world at once, the right one flies or hovers.
+// 進入 VR on the glass: the session first (it needs the touch), then the same beginning as 輕觸開始 minus fullscreen,
+// and the built-in music unless a source was already chosen; the room mic stays open alongside (Bird, 2026-11-03).
+$('vrLine').addEventListener('click', async () => {
+  if (!await enterVR()) return;
+  if (!started) begin({ fullscreen: false });
+  if (soundSource === 'mic') setSoundSource('demo');
+});
+// In VR there is no glass to touch: the left trigger jumps to the next world at once, the right one flies or hovers;
+// a short squeeze of either grip starts or stops the built-in music; a grip held one second leaves VR (帶我回來).
+const grips = new GripHold();
+function toggleMusic() {
+  if (!player.paused) { player.pause(); return; }
+  if (player.src) audio.startPlayer().then(() => player.play()).catch(() => {}); else setSoundSource('demo');
+}
 for (let i = 0; i < 2; i++) {
   const controller = renderer.xr.getController(i); scene.add(controller);
   controller.addEventListener('selectstart', () => {
@@ -852,6 +863,8 @@ for (let i = 0; i < 2; i++) {
     if (triggerAction(i) === 'world') { if (!jump) startJump(nextWorld(SCENES, world), { manual: true }); }
     else setShipMode(ship.mode === 'ship' ? 'hover' : 'ship');
   });
+  controller.addEventListener('squeezestart', () => grips.down(i, performance.now()));
+  controller.addEventListener('squeezeend', () => { if (grips.up(i, performance.now()) === 'music') toggleMusic(); });
 }
 addEventListener('pagehide', () => { recognition?.stop(); player.pause(); audio.close(); renderer.setAnimationLoop(null); worlds.dispose(); post.dispose(); renderer.dispose(); });
 
