@@ -26,6 +26,7 @@ import { SnapshotRing } from './engine/snapshots.mjs';
 import { Ship } from './engine/ship.mjs';
 import { depthToAxes } from './engine/depth.mjs';
 import { Gestures } from './engine/gestures.mjs';
+import { FrameMeter, frameLine } from './engine/frame-meter.mjs';
 import { Worlds } from './worlds.mjs';
 import { talkLanguage, captionLanguage, line as captionLine, worldName, decisionCaption } from './engine/captions.mjs';
 
@@ -650,6 +651,7 @@ function userState() {
 let lastHUD = 0, lastExplain = 0;
 function animate() {
   const raw = clock.getDelta(), dt = Math.min(raw, 0.1);
+  if (renderer.xr.isPresenting) vrMeter.record(raw);
   if (raw > 0) fps += (1 / raw - fps) * 0.05;
   if (document.hidden && !renderer.xr.isPresenting) return;
   frame(dt);
@@ -819,6 +821,7 @@ $('offline').onclick = async () => {
   } catch { $('offlineStatus').textContent = 'Download did not finish. Check the connection and browser support, then retry.'; }
   finally { clearTimeout(timer); port?.close(); $('offline').disabled = false; }
 };
+const vrMeter = new FrameMeter();
 async function setupXR() {
   try {
     if (!navigator.xr || !await navigator.xr.isSessionSupported('immersive-vr')) { $('vr').textContent = 'VR: needs a headset'; return; }
@@ -827,8 +830,9 @@ async function setupXR() {
       if (xrSession) { await xrSession.end(); return; }
       try {
         xrSession = await navigator.xr.requestSession('immersive-vr', { optionalFeatures: ['local-floor'] });
+        vrMeter.reset();
         setShipMode('hover'); camera.position.set(0, 1.6, 0); camera.rotation.set(0, 0, 0); await renderer.xr.setSession(xrSession); $('vr').textContent = 'Leave VR';
-        xrSession.addEventListener('end', () => { xrSession = null; $('vr').textContent = 'Enter Quest VR'; camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); });
+        xrSession.addEventListener('end', () => { xrSession = null; const ran = frameLine(vrMeter.summary(), capLang); $('vr').textContent = ran ? 'Enter Quest VR · ' + ran : 'Enter Quest VR'; if (ran) { $('decision').textContent = ran; caption(ran, 8, { essential: true }); } camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); });
       } catch { xrSession = null; $('vr').textContent = 'VR did not start, retry'; }
     };
   } catch { $('vr').textContent = 'VR unavailable'; }
