@@ -8,7 +8,7 @@ TYPESAFE_API_KEY or the AI Lab .env. Hosted (Render, flow.birdview.hk): --bind 0
 ALLOWED_HOSTS and FLOW_INVITE set; the whole site then opens only from the invite link (?k=TOKEN),
 which plants an HttpOnly cookie and redirects to the clean URL. The same pattern as Story Stage.
 """
-import argparse, hashlib, hmac, json, os, secrets, sys
+import argparse, hashlib, hmac, html, json, os, secrets, sys, time
 from pathlib import Path
 from http.cookies import CookieError, SimpleCookie
 from http.server import ThreadingHTTPServer, SimpleHTTPRequestHandler
@@ -261,6 +261,40 @@ def map_answers(answers, version):
     return result
 
 
+# GET /api/decide in a browser: one real question to JEV with this fixed sample, answered in plain words.
+STATUS_SAMPLE = {'scene': 'physarum', 'sceneAge': 40, 'arc': {'name': 'rise', 'waypoint': 3},
+                 'features': {'E_mean30': .42, 'C_mean30': .5, 'B_mean30': .3, 'A_mean30': .6, 'E_trend': .1, 'bpm': 96},
+                 'initiative': {'I': .2, 'locked': False, 'I0': 0}, 'locks': {'scene': False},
+                 'userText': '慢一點，太快了', 'recentDecisions': [], 'online': True}
+
+
+def status_check():
+    """Returns (healthy, lines): whether the key is set and whether JEV answered the sample sentence."""
+    key = load_key()
+    if not key:
+        return False, ['金鑰：沒有']
+    started = time.monotonic()
+    try:
+        decision = map_answers(ask_jev(key, validate_state(STATUS_SAMPLE)).get('answers', {}), 0)
+    except urlerror.HTTPError as e:
+        return False, ['金鑰：有', f'JEV 回應：{e.code}']
+    except (urlerror.URLError, TimeoutError, OSError, json.JSONDecodeError) as e:
+        return False, ['金鑰：有', f'JEV 連不上：{type(e).__name__}']
+    except (ValueError, KeyError, TypeError, AttributeError):
+        return False, ['金鑰：有', 'JEV 答案超出詞彙']
+    seconds = time.monotonic() - started
+    heard = decision.get('request') or '沒聽出要求'
+    sure = round(100 * decision['confidence'].get('request', 0))
+    return True, ['金鑰：有', f'試問「{STATUS_SAMPLE["userText"]}」：{heard}（{sure}%）', f'用時：{seconds:.2f} 秒']
+
+
+def status_page(healthy, lines):
+    rows = ''.join(f'<p>{html.escape(line)}</p>' for line in lines)
+    return ('<!doctype html><html lang="zh-Hant"><meta charset="utf-8"><meta name="viewport" content="width=device-width">'
+            f'<title>JEV 狀態</title><body style="margin:2rem;background:#05070c;color:#e8e6df;font:18px/1.7 system-ui,sans-serif">'
+            f'<h1 style="font-size:20px;font-weight:500">JEV {"正常" if healthy else "異常"}</h1>{rows}').encode()
+
+
 def ask_jev(key, state):
     payload = json.dumps({'model': JEV_MODEL, 'state': state, 'questions': build_questions(state)}).encode()
     req = urlrequest.Request(JEV_URL, data=payload, method='POST',
@@ -311,9 +345,20 @@ class Handler(SimpleHTTPRequestHandler):
     def do_GET(self):
         if not self.admitted():
             return
+        if urlparse(self.path).path == '/api/decide':
+            healthy, lines = status_check()
+            self.page(200 if healthy else 503, status_page(healthy, lines)); return
         if self.hidden():
             self.send_error(404); return
         return super().do_GET()
+
+    def page(self, status, body):
+        self.send_response(status)
+        self.send_header('Content-Type', 'text/html; charset=utf-8'); self.send_header('Content-Length', str(len(body)))
+        self.send_header('Cache-Control', 'no-store'); self._cache_set = True
+        self.end_headers()
+        if self.command != 'HEAD':
+            self.wfile.write(body)
 
     def do_HEAD(self):
         if not self.admitted():
@@ -355,12 +400,7 @@ class Handler(SimpleHTTPRequestHandler):
     def refuse(self):
         if self.command == 'POST':
             self.respond(403, {'error': 'invite required'}); return
-        self.send_response(403)
-        self.send_header('Content-Type', 'text/html; charset=utf-8'); self.send_header('Content-Length', str(len(REFUSED_PAGE)))
-        self.send_header('Cache-Control', 'no-store'); self._cache_set = True
-        self.end_headers()
-        if self.command != 'HEAD':
-            self.wfile.write(REFUSED_PAGE)
+        self.page(403, REFUSED_PAGE)
 
     def do_POST(self):
         if not self.admitted():

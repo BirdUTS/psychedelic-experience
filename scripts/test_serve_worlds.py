@@ -197,3 +197,55 @@ class HostedMode(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+STATUS_ANSWERS = {'hold': {'type': 'noul', 'noul': .4},
+                  'scene': {'type': 'choice', 'choice': 'physarum', 'probabilities': {'physarum': .9}, 'confidence': .9},
+                  'energy': {'type': 'score', 'score': 1.7, 'probabilities': {}, 'legend': {}, 'confidence': .6},
+                  'entropy': {'type': 'score', 'score': 1.6, 'probabilities': {}, 'legend': {}, 'confidence': .4},
+                  'symmetry': {'type': 'score', 'score': 1, 'probabilities': {}, 'legend': {}, 'confidence': .2},
+                  'palette': {'type': 'choice', 'choice': 'silk', 'probabilities': {'silk': .8}, 'confidence': .8},
+                  'initiative': {'type': 'choice', 'choice': 'lead', 'probabilities': {'lead': .1}, 'confidence': .1},
+                  'request': {'type': 'choice', 'choice': 'slower', 'probabilities': {'slower': .97}, 'confidence': .97},
+                  'mood': {'type': 'choice', 'choice': 'dream', 'probabilities': {'dream': .6}, 'confidence': .6},
+                  'view': {'type': 'choice', 'choice': 'distant', 'probabilities': {'distant': .3}, 'confidence': .3}}
+
+
+class StatusPage(unittest.TestCase):
+    """GET /api/decide (a browser's address bar) is a status page: one real question to JEV, answered in plain words."""
+
+    def test_get_decide_asks_jev_once_and_shows_the_answer(self):
+        with mock.patch.object(sw, 'load_key', return_value='k'), \
+             mock.patch.object(sw, 'ask_jev', return_value={'answers': STATUS_ANSWERS}) as asked, serving() as port:
+            status, h, body = get(port, '/api/decide')
+        self.assertEqual(status, 200)
+        self.assertTrue(h['content-type'].startswith('text/html'))
+        self.assertEqual(h['cache-control'], 'no-store')
+        text = body.decode()
+        self.assertIn('slower', text); self.assertIn('97%', text); self.assertIn('秒', text)
+        asked.assert_called_once()
+        self.assertEqual(asked.call_args.args[1]['userText'], sw.STATUS_SAMPLE['userText'])
+        self.assertTrue(sw.STATUS_SAMPLE['userText'])   # a request question only exists when the sample says something
+
+    def test_get_decide_without_a_key_says_so_and_asks_nothing(self):
+        with mock.patch.object(sw, 'load_key', return_value=None), \
+             mock.patch.object(sw, 'ask_jev') as asked, serving() as port:
+            status, _, body = get(port, '/api/decide')
+        self.assertEqual(status, 503)
+        self.assertIn('沒有', body.decode())
+        asked.assert_not_called()
+
+    def test_get_decide_reports_a_jev_failure(self):
+        from urllib import error as urlerror
+        boom = urlerror.HTTPError('https://api.typesafe.ai/v1/systemone', 502, 'bad gateway', {}, None)
+        with mock.patch.object(sw, 'load_key', return_value='k'), \
+             mock.patch.object(sw, 'ask_jev', side_effect=boom), serving() as port:
+            status, _, body = get(port, '/api/decide')
+        self.assertEqual(status, 503)
+        self.assertIn('502', body.decode())
+
+    def test_status_page_stays_behind_the_invite_gate(self):
+        with mock.patch.object(sw, 'ask_jev') as asked, serving(FLOW_INVITE=TOKEN) as port:
+            status, _, _ = get(port, '/api/decide')
+        self.assertEqual(status, 403)
+        asked.assert_not_called()

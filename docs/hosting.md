@@ -83,6 +83,10 @@ ALLOWED_HOSTS=localhost:8766 FLOW_INVITE=rehearsal python3 scripts/serve_worlds.
 then `http://localhost:8766/?k=rehearsal` opens the app and `http://localhost:8766/immersive/` in a private window
 answers the 403 page.
 
+`https://flow.birdview.hk/api/decide` opened in a browser (same cookie) is a status page, added 2026-11-02 after a
+GET there showed a bare 404: it says whether the key is set, asks JEV one real question (「慢一點，太快了」) and shows the
+answer and the time taken; 200 when healthy, 503 otherwise. The app itself only ever POSTs to that path.
+
 ## Not in Stage 1
 
 The phone page (`/genie`), rooms and pairing, the caption-only glass, and `/api/wish` belong to Stage 2 of
