@@ -5,8 +5,10 @@ decision in a fixed vocabulary; the browser treats it as soft targets. The API k
 
 Two ways to run it (docs/hosting.md). Locally, no environment: loopback, no gate, JEV key from
 TYPESAFE_API_KEY or the AI Lab .env. Hosted (Render, flow.birdview.hk): --bind 0.0.0.0 with
-ALLOWED_HOSTS and FLOW_INVITE set; the whole site then opens only from the invite link (?k=TOKEN),
-which plants an HttpOnly cookie and redirects to the clean URL. The same pattern as Story Stage.
+ALLOWED_HOSTS and FLOW_INVITE set; the whole site then opens only from the invite link (?k=TOKEN) or by
+typing that same token at the passcode door (POST /enter); either plants an HttpOnly cookie and redirects to
+the clean URL. The link half is the same pattern as Story Stage; the door exists for devices where typing a
+link is a chore (a headset), and it brakes after a few wrong tries.
 """
 import argparse, hashlib, hmac, html, json, os, secrets, sys, time
 from pathlib import Path
@@ -22,11 +24,50 @@ ENV_FALLBACK = Path('/Users/waiwingtang/Projects/Multimedia AI Lab/.env')
 INVITE_COOKIE = 'flow_invite'
 INVITE_COOKIE_MAX_AGE = 365 * 24 * 3600
 LOOPBACK = ('127.0.0.1', 'localhost', '::1')
-REFUSED_PAGE = ('<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">'
-                '<title>Flow with Mind</title><style>html{height:100%;background:#000;color:#b9b4a8;font:17px/1.7 system-ui,sans-serif}'
-                'body{height:100%;margin:0;display:grid;place-items:center}p{max-width:24em;padding:0 1.2em;text-align:center}</style>'
-                '<p>This page opens from an invite link.<br>Ask the person hosting tonight for it.<br>'
-                '<span lang="zh-HK">呢頁要用邀請 link 先開到，問返今晚開場嘅人攞。</span></p>').encode()
+DOOR_STYLE = ('html{height:100%;background:#05070c;color:#e8e6df;font:18px/1.7 system-ui,sans-serif}'
+              'body{height:100%;margin:0;display:grid;place-items:center}'
+              'form{display:grid;gap:.9em;justify-items:center;padding:0 1.2em;text-align:center}p{margin:0;color:#b9b4a8}'
+              'input{font:inherit;font-size:28px;text-align:center;width:6em;padding:.2em;background:transparent;color:inherit;'
+              'border:0;border-bottom:1px solid #6a665c;border-radius:0;outline:none}input:focus{border-color:#e8e6df}'
+              'button{font:inherit;padding:.35em 1.6em;background:transparent;color:inherit;border:1px solid #6a665c;border-radius:2em}')
+
+
+def door_page(message=''):
+    """The page behind the gate: one passcode field. The passcode is FLOW_INVITE, the same token the invite link carries."""
+    note = f'<p>{html.escape(message)}</p>' if message else ''
+    return ('<!doctype html><html lang="zh-Hant"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">'
+            f'<title>Flow with Mind</title><style>{DOOR_STYLE}</style><body><form method="post" action="/enter"><p>Flow with Mind</p>'
+            '<input name="code" inputmode="numeric" autocomplete="one-time-code" placeholder="密碼" aria-label="Passcode" autofocus>'
+            f'<button>進入</button>{note}</form>').encode()
+
+
+DOOR_TRIES, DOOR_TRIES_ALL, DOOR_LOCK = 5, 30, 60   # wrong tries per visitor / for everyone together → locked for DOOR_LOCK s
+DOOR_CLOCK = time.monotonic
+DOOR = {}             # visitor → [consecutive wrong tries, locked until]
+DOOR_ALL = [0, 0.0]   # the same for all visitors together, so a crowd of spoofed addresses still meets a brake
+
+
+def door_reset():
+    DOOR.clear(); DOOR_ALL[:] = [0, 0.0]
+
+
+def door_locked(visitor):
+    now = DOOR_CLOCK()
+    return DOOR_ALL[1] > now or DOOR.get(visitor, [0, 0.0])[1] > now
+
+
+def door_failed(visitor):
+    if len(DOOR) > 5000:
+        DOOR.clear()
+    for entry, tries in ((DOOR.setdefault(visitor, [0, 0.0]), DOOR_TRIES), (DOOR_ALL, DOOR_TRIES_ALL)):
+        entry[0] += 1
+        if entry[0] >= tries:
+            entry[:] = [0, DOOR_CLOCK() + DOOR_LOCK]
+
+
+def door_opened(visitor):
+    DOOR.pop(visitor, None)
+
 
 SCENES = ['physarum', 'swarm', 'boids', 'life']
 PALETTES = ['ink', 'silk', 'ember', 'neon']
@@ -318,6 +359,14 @@ class Handler(SimpleHTTPRequestHandler):
     def host_allowed(self):
         return (self.headers.get('Host') or '').lower() in allowed_hosts(self.server.server_address[1])
 
+    def visitor(self):
+        """Who is knocking: the first X-Forwarded-For address behind Render's proxy, else the socket peer."""
+        return self.headers.get('X-Forwarded-For', '').split(',')[0].strip() or self.client_address[0]
+
+    def invite_cookie(self):
+        return (f'{INVITE_COOKIE}={invite_cookie_value()}; Path=/; HttpOnly; SameSite=Lax; Max-Age={INVITE_COOKIE_MAX_AGE}'
+                + ('; Secure' if self.secure() else ''))
+
     def admitted(self):
         """Host check, then the invite gate. Answers the request itself (302 or 403) and returns False when it did."""
         if not self.host_allowed():
@@ -329,9 +378,7 @@ class Handler(SimpleHTTPRequestHandler):
             if k is not None:
                 if not invite_ok(k[0]):
                     self.refuse(); return False
-                cookie = (f'{INVITE_COOKIE}={invite_cookie_value()}; Path=/; HttpOnly; SameSite=Lax; Max-Age={INVITE_COOKIE_MAX_AGE}'
-                          + ('; Secure' if self.secure() else ''))
-                self.redirect(landing or url.path, cookie); return False
+                self.redirect(landing or url.path, self.invite_cookie()); return False
             if not cookie_admits(self.headers.get('Cookie')):
                 self.refuse(); return False
         if landing:
@@ -400,9 +447,32 @@ class Handler(SimpleHTTPRequestHandler):
     def refuse(self):
         if self.command == 'POST':
             self.respond(403, {'error': 'invite required'}); return
-        self.page(403, REFUSED_PAGE)
+        self.page(403, door_page())
+
+    def enter(self):
+        """POST /enter from the door page. Right passcode: the invite cookie and the app. Wrong: the door again, braked."""
+        if not self.host_allowed():
+            self.refuse(); return
+        if not gate_enabled():
+            self.redirect('/immersive/'); return
+        try:
+            size = int(self.headers.get('Content-Length', '0'))
+            if not 0 <= size <= 512:
+                raise ValueError('bad size')
+            code = parse_qs(self.rfile.read(size).decode()).get('code', [''])[0].strip()
+        except (ValueError, UnicodeDecodeError):
+            code = ''
+        who = self.visitor()
+        if door_locked(who):
+            self.page(403, door_page('試得太多，稍後再試。')); return
+        if invite_ok(code):
+            door_opened(who); self.redirect('/immersive/', self.invite_cookie()); return
+        door_failed(who)
+        self.page(403, door_page('密碼不對。'))
 
     def do_POST(self):
+        if urlparse(self.path).path == '/enter':
+            self.enter(); return
         if not self.admitted():
             return
         if self.path != '/api/decide':

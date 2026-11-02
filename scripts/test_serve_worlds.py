@@ -116,11 +116,12 @@ class HostedMode(unittest.TestCase):
             status, _, _ = get(port, '/immersive/')
         self.assertEqual(status, 200)
 
-    def test_gate_blocks_a_visitor_without_the_invite(self):
+    def test_gate_shows_a_visitor_without_the_invite_the_passcode_door(self):
         with serving(FLOW_INVITE=TOKEN) as port:
             status, h, body = get(port, '/immersive/')
             api, _, _ = post(port, '/api/decide')
-        self.assertEqual(status, 403); self.assertIn(b'invite', body.lower()); self.assertNotIn('set-cookie', h)
+        self.assertEqual(status, 403); self.assertNotIn('set-cookie', h)
+        self.assertIn(b'action="/enter"', body); self.assertIn(b'name="code"', body); self.assertIn('密碼'.encode(), body)
         self.assertEqual(api, 403)
 
     def test_invite_link_sets_a_cookie_and_drops_the_token_from_the_url(self):
@@ -249,3 +250,66 @@ class StatusPage(unittest.TestCase):
             status, _, _ = get(port, '/api/decide')
         self.assertEqual(status, 403)
         asked.assert_not_called()
+
+
+FORM = {'Content-Type': 'application/x-www-form-urlencoded'}
+
+
+def knock(port, code, ip=None):
+    headers = dict(FORM)
+    if ip:
+        headers['X-Forwarded-For'] = ip
+    return post(port, '/enter', headers, f'code={code}'.encode())
+
+
+class Door(unittest.TestCase):
+    """The passcode door: the same cookie as the invite link, typed at the page instead of carried in the URL."""
+
+    def setUp(self):
+        sw.door_reset()
+
+    def test_the_right_passcode_plants_the_invite_cookie_and_enters(self):
+        with serving(FLOW_INVITE='1111') as port:
+            status, h, _ = knock(port, '1111')
+            _, link_h, _ = get(port, '/?k=1111')
+            opened, _, _ = get(port, '/immersive/', {'Cookie': h['set-cookie'].split(';')[0]})
+        self.assertEqual(status, 302); self.assertEqual(h['location'], '/immersive/')
+        self.assertEqual(h['set-cookie'], link_h['set-cookie'])   # one cookie, two doors
+        self.assertEqual(opened, 200)
+
+    def test_a_wrong_passcode_says_so_and_plants_nothing(self):
+        with serving(FLOW_INVITE='1111') as port:
+            status, h, body = knock(port, '1112')
+        self.assertEqual(status, 403); self.assertNotIn('set-cookie', h)
+        self.assertIn('不對'.encode(), body); self.assertIn(b'name="code"', body)
+
+    def test_five_wrong_passcodes_lock_that_visitor_out_for_a_minute(self):
+        clock = mock.Mock(return_value=1000.0)
+        with mock.patch.object(sw, 'DOOR_CLOCK', clock), serving(FLOW_INVITE='1111') as port:
+            for _ in range(5):
+                knock(port, '0000')
+            locked, h, body = knock(port, '1111')
+            clock.return_value = 1000.0 + sw.DOOR_LOCK + 1
+            later, _, _ = knock(port, '1111')
+        self.assertEqual(locked, 403); self.assertNotIn('set-cookie', h); self.assertIn('稍後'.encode(), body)
+        self.assertEqual(later, 302)
+
+    def test_visitors_are_told_apart_by_x_forwarded_for_behind_the_proxy(self):
+        with serving(FLOW_INVITE='1111') as port:
+            for _ in range(5):
+                knock(port, '0000', ip='203.0.113.9')
+            other, _, _ = knock(port, '1111', ip='203.0.113.10')
+            same, _, _ = knock(port, '1111', ip='203.0.113.9')
+        self.assertEqual(other, 302); self.assertEqual(same, 403)
+
+    def test_many_wrong_passcodes_from_everywhere_lock_the_door_for_everyone(self):
+        with serving(FLOW_INVITE='1111') as port:
+            for i in range(sw.DOOR_TRIES_ALL):
+                knock(port, '0000', ip=f'198.51.100.{i}')
+            fresh, _, _ = knock(port, '1111', ip='192.0.2.1')
+        self.assertEqual(fresh, 403)
+
+    def test_the_door_with_the_gate_off_just_enters(self):
+        with serving() as port:
+            status, h, _ = knock(port, '1111')
+        self.assertEqual(status, 302); self.assertEqual(h['location'], '/immersive/'); self.assertNotIn('set-cookie', h)

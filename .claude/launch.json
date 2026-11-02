@@ -4,8 +4,24 @@
     {
       "name": "worlds",
       "runtimeExecutable": "python3",
-      "runtimeArgs": ["scripts/serve-worlds.py", "--port", "8766"],
+      "runtimeArgs": [
+        "scripts/serve-worlds.py",
+        "--port",
+        "8766"
+      ],
       "port": 8766
+    },
+    {
+      "name": "door",
+      "runtimeExecutable": "env",
+      "runtimeArgs": [
+        "FLOW_INVITE=1111",
+        "python3",
+        "scripts/serve_worlds.py",
+        "--port",
+        "8767"
+      ],
+      "port": 8767
     }
   ]
 }
