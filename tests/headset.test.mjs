@@ -8,8 +8,11 @@ test('the VR line shows only where immersive VR runs, and never during a session
   assert.equal(headsetLine({supported:true,presenting:false}),true,'back once the session ends, so a second visit needs no ?dev');
   assert.equal(headsetLine(),false);
 });
-test('in VR the left trigger changes the world and the right one flies or hovers',()=>{
-  assert.equal(triggerAction(0),'world');assert.equal(triggerAction(1),'flight');
+test('in VR the left hand changes the world and the right one flies, by handedness, not by the slot three.js filled first',()=>{
+  assert.equal(triggerAction('left',0),'world');assert.equal(triggerAction('right',1),'flight');
+  assert.equal(triggerAction('right',0),'flight','a right hand tracked first lands in slot 0 and must still fly');
+  assert.equal(triggerAction('left',1),'world','a left hand tracked second still changes the world');
+  assert.equal(triggerAction('none',0),'world','no handedness: the slot decides');assert.equal(triggerAction(undefined,1),'flight');
 });
 test('the next world wraps around, and an unknown start lands on the first',()=>{
   const w=['physarum','swarm','boids','life'];

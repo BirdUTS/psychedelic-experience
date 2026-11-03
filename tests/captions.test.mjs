@@ -14,6 +14,8 @@ test('both languages carry the same lines, and the Chinese ones stay short',()=>
   assert.deepEqual(Object.keys(LINES.zh).sort(),Object.keys(LINES.en).sort());
   for(const [k,v] of Object.entries(LINES.zh))assert.ok(v.length<=18,`${k}: ${v}`);
   assert.equal(line('start','zh'),'輕觸開始');assert.equal(line('ground','zh'),'我在。慢慢來。');assert.equal(line('start','en'),'Tap to begin');assert.equal(line('vr','zh'),'進入 VR');assert.equal(line('vr','en'),'Enter VR');assert.equal(line('vrGrip','zh'),'低頭兩秒回來 · 輕握音樂');assert.equal(line('vrGrip','en'),'Look down two seconds to come back · squeeze: music');
+  assert.equal(line('vrHands','zh'),'左手捏：換世界 · 右手捏：飛');assert.equal(line('vrHands','en'),'Pinch or pull left: next world · right: fly');
+  assert.equal(line('noEar','zh'),'這裡聽不到說話');assert.equal(line('noEar','en'),'This browser cannot hear speech');assert.equal(line('hintSwipe','zh'),'左右掃：換個世界');assert.equal(line('hintSwipe','en'),'Swipe left or right: next world');
   assert.equal(line('no-such-line','zh'),'');
 });
 test('world names are two characters in Chinese and a word in English',()=>{
@@ -30,4 +32,10 @@ test('a decision becomes at most two short tokens: the world when it changes, th
   assert.equal(decisionCaption({version:1,confidence:{},energy:.2},{world:'swarm',lang:'zh'}),'更靜');
   assert.equal(decisionCaption({version:1,confidence:{},energy:.5,hold:.3},{world:'swarm',lang:'zh'}),'','steady energy says nothing');
   assert.equal(decisionCaption(null,{world:'swarm',lang:'zh'}),'');
+});
+
+import {beginCaptions} from '../immersive/engine/captions.mjs';
+test('a browser with no speech recogniser (the Quest) is told so at the first touch, and shown the swipe instead of the voice hints',()=>{
+  assert.deepEqual(beginCaptions({hasEar:false}),['noEar','hintSwipe']);
+  assert.deepEqual(beginCaptions({hasEar:true}),[],'with an ear the hints come once it is really listening');
 });

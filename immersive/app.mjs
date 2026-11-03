@@ -29,7 +29,7 @@ import { Gestures } from './engine/gestures.mjs';
 import { FrameMeter, frameLine } from './engine/frame-meter.mjs';
 import { headsetLine, triggerAction, nextWorld, GripHold, foldCount, LookDown } from './engine/headset.mjs';
 import { Worlds } from './worlds.mjs';
-import { talkLanguage, captionLanguage, line as captionLine, worldName, decisionCaption } from './engine/captions.mjs';
+import { talkLanguage, captionLanguage, line as captionLine, worldName, decisionCaption, beginCaptions } from './engine/captions.mjs';
 
 const $ = id => document.getElementById(id), RAD = Math.PI / 180;
 // The quiet glass (v4 step 1): a guest sees the picture, one line to begin, and captions; nothing to set. ?dev keeps
@@ -220,7 +220,10 @@ function act(action) {
       else { director.agency.gesture(2); attractor = { x: action.x / innerWidth, y: action.y / innerHeight }; attractorUntil = simClock + 0.6; }
       break;
     case 'swipe': {
-      if (QUIET) break;
+      if (QUIET) {   // the glass's one hand gesture for worlds, for a browser that cannot hear (the Quest) and for anyone who prefers it
+        if (started && !jump && (action.dir === 'left' || action.dir === 'right')) startJump(SCENES[(SCENES.indexOf(world) + (action.dir === 'left' ? 1 : SCENES.length - 1)) % SCENES.length], { manual: true });
+        break;
+      }
       if (action.dir === 'left' || action.dir === 'right') {
         const i = SCENES.indexOf(world), next = SCENES[(i + (action.dir === 'left' ? 1 : SCENES.length - 1)) % SCENES.length];
         director.requestScene(next); $('decision').textContent = `requested: ${next}` + (director.initiative.I > -0.5 ? ' · at the next phrase' : '');
@@ -346,6 +349,7 @@ function begin({ fullscreen = true } = {}) {
   started = true; $('start').classList.add('gone'); document.body.classList.add('immersed'); touch();
   audio.resume();
   openEar();   // the words to say come only once the ear is really open (setTalk)
+  for (const k of beginCaptions({ hasEar: !!Recognition })) caption(captionLine(k, capLang), 4);   // no ear here (the Quest): say so, show the swipe
   // Fullscreen may be refused (an embedded page); nothing waits on it. A headset is already full.
   if (fullscreen && !document.fullscreenElement) { try { document.documentElement.requestFullscreen({ navigationUI: 'hide' })?.catch?.(() => {}); } catch { /* no fullscreen here */ } }
 }
@@ -879,18 +883,21 @@ function showFeet(progress) {
   feet.material.opacity = 0.25 + 0.75 * progress; feet.scale.setScalar(1.6 - 0.9 * progress);
 }
 window.__flow.lookDown = { tick: () => floorLook.tick(camera.getWorldDirection(lookDir).y, performance.now()), show: showFeet, feet };   // checks
-// In VR there is no glass to touch: the left trigger jumps to the next world at once, the right one flies or hovers;
-// a short squeeze of either grip starts or stops the built-in music; a grip held one second leaves VR (帶我回來).
-const grips = new GripHold();
+// In VR there is no glass to touch: the left hand (trigger or pinch) jumps to the next world at once, the right one
+// flies or hovers; a short squeeze of either grip starts or stops the built-in music; a grip held one second leaves
+// VR (帶我回來). Which hand a slot holds comes from its input source, not its index: three.js fills slot 0 first.
+const grips = new GripHold(), slotHand = ['none', 'none'];
 function toggleMusic() {
   if (!player.paused) { player.pause(); return; }
   if (player.src) audio.startPlayer().then(() => player.play()).catch(() => {}); else setSoundSource('demo');
 }
 for (let i = 0; i < 2; i++) {
   const controller = renderer.xr.getController(i); scene.add(controller);
+  controller.addEventListener('connected', e => { slotHand[i] = e.data?.handedness || 'none'; });
+  controller.addEventListener('disconnected', () => { slotHand[i] = 'none'; });
   controller.addEventListener('selectstart', () => {
     gestureCount++; touch();
-    if (triggerAction(i) === 'world') { if (!jump) startJump(nextWorld(SCENES, world), { manual: true }); }
+    if (triggerAction(slotHand[i], i) === 'world') { if (!jump) startJump(nextWorld(SCENES, world), { manual: true }); }
     else setShipMode(ship.mode === 'ship' ? 'hover' : 'ship');
   });
   controller.addEventListener('squeezestart', () => grips.down(i, performance.now()));

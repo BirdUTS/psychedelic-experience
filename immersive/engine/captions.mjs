@@ -17,7 +17,8 @@ export const LINES = {
     start: '輕觸開始', hint: '可以說：慢一點、快一點、帶我回來', hintHold: '按住一秒：帶我回來', hintWorld: '說：換個世界', hintCalm: '說：靜一點',
     ground: '我在。慢慢來。', groundOff: '繼續', pause: '暫停', resume: '繼續', hold: '停留', release: '繼續走', rewind: '重來',
     fly: '飛', hover: '停下', slower: '慢一點', faster: '快一點', calmer: '靜一點', deeper: '更深', stronger: '更強', softer: '更靜',
-    noMic: '沒有麥克風，照樣可以看', listening: '在聽', vr: '進入 VR', vrHands: '左手換世界 · 右手飛', vrGrip: '低頭兩秒回來 · 輕握音樂',
+    noMic: '沒有麥克風，照樣可以看', listening: '在聽', vr: '進入 VR', vrHands: '左手捏：換世界 · 右手捏：飛', vrGrip: '低頭兩秒回來 · 輕握音樂',
+    noEar: '這裡聽不到說話', hintSwipe: '左右掃：換個世界',
     hostSound: '聲音來源', hostCaptions: '字幕', hostComfort: '舒適', hostLanguage: '語言',
     soundMic: '房間麥克風', soundComputer: '電腦音樂', soundDemo: '示範音樂', capAll: '全部', capGround: '只在帶我回來', capNone: '無',
     comfortOn: '柔和', comfortOff: '正常', langYue: '廣東話', langEn: 'English', langCmn: '普通話', hostHint: 'Esc 或按住右下角兩秒可再打開。',
@@ -26,12 +27,18 @@ export const LINES = {
     start: 'Tap to begin', hint: 'Say: slower, faster, bring me back', hintHold: 'Hold a second: bring me back', hintWorld: 'Say: another world', hintCalm: 'Say: softer',
     ground: "I'm here. Take your time.", groundOff: 'Onward', pause: 'Paused', resume: 'Onward', hold: 'Staying', release: 'Moving on', rewind: 'Again',
     fly: 'Flying', hover: 'Hovering', slower: 'Slower', faster: 'Faster', calmer: 'Softer', deeper: 'Deeper', stronger: 'Stronger', softer: 'Softer',
-    noMic: 'No microphone; watching still works', listening: 'Listening', vr: 'Enter VR', vrHands: 'Left hand: next world · right: fly', vrGrip: 'Look down two seconds to come back · squeeze: music',
+    noMic: 'No microphone; watching still works', listening: 'Listening', vr: 'Enter VR', vrHands: 'Pinch or pull left: next world · right: fly', vrGrip: 'Look down two seconds to come back · squeeze: music',
+    noEar: 'This browser cannot hear speech', hintSwipe: 'Swipe left or right: next world',
     hostSound: 'Sound', hostCaptions: 'Captions', hostComfort: 'Comfort', hostLanguage: 'Language',
     soundMic: 'Room mic', soundComputer: 'Computer music', soundDemo: 'Demo music', capAll: 'All', capGround: 'Only bring me back', capNone: 'None',
     comfortOn: 'Gentle', comfortOff: 'Normal', langYue: '廣東話', langEn: 'English', langCmn: '普通話', hostHint: 'Esc, or hold the bottom-right corner for two seconds, opens this again.',
   },
 };
+
+/* What the first touch says about the ear (2026-11-03): the Quest browser has no speech recogniser, so on it the
+   glass had promised voice it could never hear and Bird could not tell whether JEV or the mic was broken. With no
+   ear the glass says so once and shows the hand's way to the next world; with an ear the hints wait for setTalk. */
+export function beginCaptions({ hasEar = true } = {}) { return hasEar ? [] : ['noEar', 'hintSwipe']; }
 
 export function line(key, lang = 'en') {
   return (LINES[lang] || LINES.en)[key] || '';

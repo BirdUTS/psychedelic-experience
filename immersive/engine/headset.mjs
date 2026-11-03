@@ -1,9 +1,16 @@
 /* The headset entry on the quiet glass (2026-11-03). The glass has no buttons, but a Quest has no other way in:
    where the browser can run immersive VR a second line, 進入 VR, sits under 輕觸開始 and stays at the foot of the
    glass between sessions; it is gone while a session runs. In VR there is no glass to touch, so the two triggers
-   do the glass's work: the left hand changes the world, the right hand flies or hovers. Pure; no DOM, no WebXR. */
+   do the glass's work: the left hand changes the world, the right hand flies or hovers. Pure; no DOM, no WebXR.
+   By handedness (2026-11-03, Bird's third Quest run, "cannot change world"): three.js fills controller slot 0 with
+   whichever input source arrived first, and with hand tracking that is often the right hand, so the slot said
+   nothing about the hand. The input source's handedness decides; the slot only when it reports none. */
 export function headsetLine({ supported = false, presenting = false } = {}) { return !!supported && !presenting; }
-export function triggerAction(hand) { return hand === 0 ? 'world' : 'flight'; }
+export function triggerAction(handedness, slot = 0) {
+  if (handedness === 'left') return 'world';
+  if (handedness === 'right') return 'flight';
+  return slot === 0 ? 'world' : 'flight';
+}
 export function nextWorld(worlds, current) { return worlds[(worlds.indexOf(current) + 1) % worlds.length]; }
 
 /* Grips in VR (same day): a short squeeze is music (start or stop the built-in playlist); a squeeze held holdMs,
