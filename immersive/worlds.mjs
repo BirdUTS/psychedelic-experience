@@ -20,7 +20,10 @@ export class Worlds {
     this.ctx = this.canvas.getContext('2d'); this.pixels = this.ctx.createImageData(size, size);
     this.texture = new THREE.CanvasTexture(this.canvas); this.texture.colorSpace = THREE.SRGBColorSpace;
     this.texture.minFilter = this.texture.magFilter = THREE.LinearFilter;
-    this.tunnelTexture = this.texture.clone(); this.tunnelTexture.wrapS = this.tunnelTexture.wrapT = THREE.RepeatWrapping; this.tunnelTexture.repeat.set(1, 3);
+    // Around the viewer the trail texture wraps mirrored, so a headset can fold the world by repeating it (v3.11); at repeat 1 it is the texture as it is.
+    this.texture.wrapS = THREE.MirroredRepeatWrapping;
+    this.tunnelTexture = this.texture.clone(); this.tunnelTexture.wrapS = THREE.MirroredRepeatWrapping; this.tunnelTexture.wrapT = THREE.RepeatWrapping; this.tunnelTexture.repeat.set(1, 3);
+    this.foldRepeat = 1;
     const haloCanvas = document.createElement('canvas'); haloCanvas.width = haloCanvas.height = 64;
     const hc = haloCanvas.getContext('2d'), hg = hc.createRadialGradient(32, 32, 0, 32, 32, 32);
     hg.addColorStop(0, 'rgba(255,255,255,1)'); hg.addColorStop(0.15, 'rgba(255,255,255,.7)'); hg.addColorStop(0.5, 'rgba(255,255,255,.12)'); hg.addColorStop(1, 'rgba(255,255,255,0)');
@@ -92,6 +95,16 @@ export class Worlds {
     this.visual.frustumCulled = false;
     if (world === 'swarm') this.addHalos(s.swarm);
     if (world === 'boids') this.addHalos(s.boids);
+  }
+
+  // The in-world fold for a headset (v3.11): the trail texture mirrored `repeat` times around the viewer (sphere, tunnel
+  // or dish), eased over fadeSeconds like the flat picture's fold cross-fade. 1 is the texture as it is; the flat picture
+  // folds in PostFX and keeps 1. No fadeSeconds: at once.
+  fold(repeat, dt = 0, fadeSeconds = 0) {
+    const k = fadeSeconds > 0 ? 1 - Math.exp(-dt / (fadeSeconds / 3)) : 1;
+    this.foldRepeat += (repeat - this.foldRepeat) * k;
+    if (Math.abs(this.foldRepeat - repeat) < 0.002) this.foldRepeat = repeat;
+    this.texture.repeat.x = this.foldRepeat; this.tunnelTexture.repeat.x = this.foldRepeat;
   }
 
   // Translate agents toward the viewer so a travelling world streams past (the sims re-enter them ahead).

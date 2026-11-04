@@ -54,3 +54,19 @@ export class LookDown {
     return { progress, leave };
   }
 }
+
+/* The in-world kaleidoscope (v3.11, 2026-11-05). The flat picture folds the screen; a headset has no screen, so the
+   world is folded instead. A textured world (the mycelium sphere, tunnel or dish) mirrors its texture K/2 times
+   around the viewer, which costs nothing; a particle world (fireflies, fish, the planet's cells) is drawn K times
+   around the viewer, every second copy mirrored, so the copies meet on mirror planes the way the wedges of a
+   kaleidoscope do. Copies cost one render each, so they stop at the count the Quest has been measured to carry:
+   ?folds=4 held 82 fps on 2026-11-03. ?folds=K forces K, past the Director and the cap, as the load test. Pure. */
+export const VR_COPY_CAP = 4;
+export function foldPlan(fold, { world = 'physarum', forced = 0, cap = VR_COPY_CAP } = {}) {
+  const K = forced > 1 ? Math.floor(forced) : Math.floor(Number(fold) || 0);
+  if (K < 2) return { repeat: 1, copies: [] };
+  if (world === 'physarum') return { repeat: K / 2, copies: [] };
+  const n = forced > 1 ? K : Math.min(K, cap), copies = [];
+  for (let k = 1; k < n; k++) copies.push({ rotY: k * 2 * Math.PI / n, mirror: k % 2 === 1 });
+  return { repeat: 1, copies };
+}

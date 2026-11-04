@@ -27,7 +27,7 @@ import { Ship } from './engine/ship.mjs';
 import { depthToAxes } from './engine/depth.mjs';
 import { Gestures } from './engine/gestures.mjs';
 import { FrameMeter, frameLine } from './engine/frame-meter.mjs';
-import { headsetLine, triggerAction, nextWorld, GripHold, foldCount, LookDown } from './engine/headset.mjs';
+import { headsetLine, triggerAction, nextWorld, GripHold, foldCount, LookDown, foldPlan } from './engine/headset.mjs';
 import { Worlds } from './worlds.mjs';
 import { talkLanguage, captionLanguage, line as captionLine, worldName, decisionCaption, beginCaptions } from './engine/captions.mjs';
 
@@ -656,6 +656,18 @@ function userState() {
   return { H: 0.5, T: 0.5, D: 0.5, S: axes.fold, F: axes.feedback, hue: 0, camera: ship.mode === 'ship' ? 'flight' : 'orbit', sceneLocked };
 }
 let lastHUD = 0, lastExplain = 0;
+// The world, then its copies turned and mirrored around the viewer, drawn over the first pass with depth kept (v3.11).
+// The stars and the feet ring are scene objects and are drawn once: a second pass of a transparent ring would brighten it.
+let vrPlan = null;
+function renderFolded(copies) {
+  renderer.render(scene, camera);
+  if (!copies.length) return;
+  const y = group.rotation.y, sx = group.scale.x, stars = worlds.stars.visible, ring = feet.visible;
+  renderer.autoClear = false; worlds.stars.visible = false; feet.visible = false;
+  for (const c of copies) { group.rotation.y = y + c.rotY; group.scale.x = c.mirror ? -sx : sx; renderer.render(scene, camera); }
+  renderer.autoClear = true; group.rotation.y = y; group.scale.x = sx; worlds.stars.visible = stars; feet.visible = ring;
+}
+window.__flow.vrFold = { plan: () => vrPlan, repeat: () => worlds.foldRepeat, render: copies => renderFolded(copies), fold: (r, dt, fade) => worlds.fold(r, dt, fade), foldPlan };   // checks
 function animate() {
   const raw = clock.getDelta(), dt = Math.min(raw, 0.1);
   if (renderer.xr.isPresenting) {
@@ -727,23 +739,17 @@ function frame(dt) {
       if (Math.abs(camera.fov - pose.fov) > 0.05) { camera.fov += (pose.fov - camera.fov) * k; camera.updateProjectionMatrix(); }
     }
   }
-  if (renderer.xr.isPresenting) {
-    renderer.render(scene, camera);
-    // ?folds=K load test: the same world K times, turned around the viewer, added on top; the frame meter reads the cost.
-    if (VR_FOLDS > 1) {
-      const y = group.rotation.y; renderer.autoClear = false;
-      for (let k = 1; k < VR_FOLDS; k++) { group.rotation.y = y + k * Math.PI * 2 / VR_FOLDS; renderer.render(scene, camera); }
-      renderer.autoClear = true; group.rotation.y = y;
-    }
-  }
-  else {
-    // v3: the director's state becomes a program (grammar), blended over time; gestures speak on top of it.
+  // v3: the director's state becomes a program (grammar), blended over time; gestures speak on top of it.
+  // In a headset the same program folds the world instead of the screen (v3.11), so the kaleidoscope comes and goes
+  // with the music there too; shots belong to the flat picture, a headset's camera is the head.
+  const inVR = renderer.xr.isPresenting;
+  {
     const beatSeconds = 60 / Math.max(60, out.hud.bpm);
     if (!paused) {
       passages.update({ phrase: out.phraseBoundary, landed: landedFired }); landedFired = false;
-      if (ship.mode === 'hover' && !jump) { shots.update({ phrase: out.phraseBoundary, world }); if (shots.changed) startShot(); }
+      if (!inVR && ship.mode === 'hover' && !jump) { shots.update({ phrase: out.phraseBoundary, world }); if (shots.changed) startShot(); }
     }
-    const cleanShot = ship.mode === 'hover' && !jump && shots.shot.clean, rawNow = passages.raw || cleanShot;
+    const cleanShot = !inVR && ship.mode === 'hover' && !jump && shots.shot.clean, rawNow = passages.raw || cleanShot;
     // Your voice (room speech or a clap; the mic alone plays both roles): analysed here, never recorded or sent.
     const roomSpeech = frames.room ? roomF.speech : frames.source === 'mic' ? musicF.speech : 0;
     const roomClap = frames.room ? roomF.onset : frames.source === 'mic' ? musicF.onset : 0;
@@ -781,14 +787,21 @@ function frame(dt) {
     if (rawNow && !jump) { program.fold = 0; program.mirror = 'none'; program.formContrast = 0; program.tunnel = 0; }   // a raw passage stays raw under gestures
     if (calm) { program.chromaSplit = 0; program.chromaCycle = 0; program.gain = Math.min(program.gain, 0.5); }   // calm holds against gestures, moods and the debug hook
     if (!paused) phases.advance(dt, program);   // a paused picture holds still
-    // Quality drops to half after two seconds under 50 fps and returns after five good seconds.
-    if (fps < 50) { lowFpsFor += dt; highFpsFor = 0; } else { lowFpsFor = 0; if (fps > 57) highFpsFor += dt; }
-    if (lowFpsFor > 2 && quality > 0.5) { quality = 0.5; lowFpsFor = 0; } else if (highFpsFor > 5 && quality < 1) { quality = 1; highFpsFor = 0; }
     // Fold cross-fades: one beat around a gesture, 1 s for jumps and dives, otherwise a phrase (16 beats, at most 8 s).
     const fadeSeconds = g.active || now - lastGestureEnd < 2 * beatSeconds ? Math.min(1, beatSeconds) : jump || ship.diving ? 1 : Math.min(8, 16 * beatSeconds);
-    const tPost = performance.now();
-    post.render(scene, camera, program, { pulse: out.pulse, beatPhase: out.phase, phases: phases.wrapped(), dt, quality, fadeSeconds });
-    timing.post = performance.now() - tPost;
+    if (inVR) {
+      // The in-world fold: the texture mirror eases like the flat fold; the copies step with the fold itself, on the phrase.
+      vrPlan = foldPlan(program.fold, { world, forced: VR_FOLDS });
+      worlds.fold(vrPlan.repeat, dt, fadeSeconds);
+      renderFolded(vrPlan.copies);
+    } else {
+      // Quality drops to half after two seconds under 50 fps and returns after five good seconds.
+      if (fps < 50) { lowFpsFor += dt; highFpsFor = 0; } else { lowFpsFor = 0; if (fps > 57) highFpsFor += dt; }
+      if (lowFpsFor > 2 && quality > 0.5) { quality = 0.5; lowFpsFor = 0; } else if (highFpsFor > 5 && quality < 1) { quality = 1; highFpsFor = 0; }
+      const tPost = performance.now();
+      post.render(scene, camera, program, { pulse: out.pulse, beatPhase: out.phase, phases: phases.wrapped(), dt, quality, fadeSeconds });
+      timing.post = performance.now() - tPost;
+    }
   }
   if (now - lastHUD > 0.15) { lastHUD = now; updateHUD(out, frames, L); }
   if (!$('explain').hidden && now - lastExplain > 0.5) { lastExplain = now; updateExplain(out, L); }
@@ -851,7 +864,7 @@ async function enterVR() {
   catch { xrSession = null; $('vr').textContent = 'VR did not start, retry'; return false; }
   vrMeter.reset(); grips.reset(); floorLook.reset(); musicIssue = '';
   setShipMode('hover'); camera.position.set(0, 1.6, 0); camera.rotation.set(0, 0, 0); await renderer.xr.setSession(xrSession); $('vr').textContent = 'Leave VR'; showVrLine();
-  xrSession.addEventListener('end', () => { xrSession = null; feet.visible = false; const ran = [frameLine(vrMeter.summary(), capLang), musicIssue && `${capLang === 'zh' ? '音樂未播' : 'music did not play'} ${musicIssue}`].filter(Boolean).join(' · '); $('vr').textContent = ran ? 'Enter Quest VR · ' + ran : 'Enter Quest VR'; if (ran) { $('decision').textContent = ran; caption(ran, 8, { essential: true }); } camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); showVrLine(); });
+  xrSession.addEventListener('end', () => { const rate = xrSession?.frameRate; xrSession = null; feet.visible = false; vrPlan = null; worlds.fold(1); const ran = [frameLine(vrMeter.summary(), capLang, { rate }), musicIssue && `${capLang === 'zh' ? '音樂未播' : 'music did not play'} ${musicIssue}`].filter(Boolean).join(' · '); $('vr').textContent = ran ? 'Enter Quest VR · ' + ran : 'Enter Quest VR'; if (ran) { $('decision').textContent = ran; caption(ran, 8, { essential: true }); } camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); showVrLine(); });
   return true;
 }
 async function setupXR() {

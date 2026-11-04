@@ -58,3 +58,35 @@ test('looking up again resets the clock; a shallow look down (30°) and a missin
 test('reset clears a look that a session end cut short, so the next session starts clean',()=>{
   const f=new LookDown();f.tick(-1,0);f.tick(-1,2000);f.reset();assert.deepEqual(f.tick(-1,5000),{progress:0,leave:false});
 });
+
+import {foldPlan, VR_COPY_CAP} from '../immersive/engine/headset.mjs';
+test('no fold, or a fold under 2, folds nothing in any world',()=>{
+  for (const world of ['physarum','swarm','boids','life']) {
+    assert.deepEqual(foldPlan(0,{world}),{repeat:1,copies:[]});
+    assert.deepEqual(foldPlan(NaN,{world}),{repeat:1,copies:[]});
+    assert.deepEqual(foldPlan(1,{world}),{repeat:1,copies:[]});
+  }
+});
+test('a textured world (the mycelium sphere, tunnel or dish) folds by mirroring its texture K/2 times around the viewer, at no cost',()=>{
+  assert.deepEqual(foldPlan(4,{world:'physarum'}),{repeat:2,copies:[]});
+  assert.deepEqual(foldPlan(8,{world:'physarum'}),{repeat:4,copies:[]});
+  assert.deepEqual(foldPlan(2,{world:'physarum'}),{repeat:1,copies:[]},'fold 2 is one mirrored lap, the texture as it is');
+});
+test('a particle world is drawn K times around the viewer, every second copy mirrored, so the copies share mirror planes like a kaleidoscope',()=>{
+  const p=foldPlan(4,{world:'swarm'});
+  assert.equal(p.repeat,1);assert.equal(p.copies.length,3);
+  assert.deepEqual(p.copies.map(c=>+(c.rotY/Math.PI).toFixed(3)),[0.5,1,1.5]);
+  assert.deepEqual(p.copies.map(c=>c.mirror),[true,false,true]);
+  assert.deepEqual(foldPlan(2,{world:'boids'}).copies,[{rotY:Math.PI,mirror:true}]);
+});
+test('copies stop at the count the Quest has carried (?folds=4 held 82 fps), until a bigger load test is measured',()=>{
+  assert.equal(VR_COPY_CAP,4);
+  assert.equal(foldPlan(8,{world:'boids'}).copies.length,3,'fold 8 draws 4 copies, not 8');
+  assert.equal(foldPlan(6,{world:'life'}).copies.length,3);
+  assert.equal(foldPlan(8,{world:'physarum'}).repeat,4,'the texture mirror is free and never capped');
+});
+test('?folds=K forces the fold, past the Director and the cap, so the load test measures the real mechanism',()=>{
+  assert.equal(foldPlan(0,{world:'swarm',forced:8}).copies.length,7);
+  assert.deepEqual(foldPlan(0,{world:'physarum',forced:4}),{repeat:2,copies:[]});
+  assert.equal(foldPlan(4,{world:'swarm',forced:1}).copies.length,3,'forced 1 is not forcing');
+});
